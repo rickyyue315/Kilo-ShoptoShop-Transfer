@@ -467,119 +467,219 @@ def create_visualization(stats, transfer_suggestions_df, mode):
     """Create matplotlib visualization based on mode"""
     if transfer_suggestions_df.empty:
         return None
-    
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    # Prepare data for visualization
-    om_transfer_data = transfer_suggestions_df.groupby(['OM', 'Transfer Type'])['Transfer Qty'].sum().unstack(fill_value=0)
-    
-    # Add receive data
+
+    fig, ax = plt.subplots(figsize=(14, 8))
+
+    # Prepare transfer-out data by OM and Transfer Type
+    transfer_out_by_om_type = transfer_suggestions_df.groupby(['OM', 'Transfer Type'])['Transfer Qty'].sum().unstack(fill_value=0)
+
+    # Prepare receive data by OM
     receive_data = transfer_suggestions_df.groupby('Receive Site')['Transfer Qty'].sum()
     receive_by_om = transfer_suggestions_df.drop_duplicates('Receive Site').set_index('Receive Site')['OM']
     receive_by_om = receive_by_om[receive_data.index]
-    receive_by_type = pd.DataFrame({'Actual Receive Qty': receive_data.values}, index=receive_by_om.values)
-    receive_by_type = receive_by_type.groupby(level=0).sum()
-    
-    # Add target data
-    target_data = transfer_suggestions_df.drop_duplicates('Receive Site').groupby('OM')['Receive Site Target Qty'].sum()
-    
+    receive_by_om_grouped = receive_by_om.groupby(receive_by_om).sum().rename('實際接收數量')
+
+    # Prepare target data by OM
+    target_by_om = transfer_suggestions_df.drop_duplicates('Receive Site').groupby('OM')['Receive Site Target Qty'].sum().rename('需求接收數量')
+
     # Combine all data
-    combined_data = om_transfer_data.join(receive_by_type).join(target_data).fillna(0)
-    
-    # Create bar chart
+    combined_data = transfer_out_by_om_type.join(receive_by_om_grouped).join(target_by_om).fillna(0)
+
+    # Define expected columns for each mode
     if mode == 'conservative':
-        # Conservative mode: 4 bars
-        combined_data.plot(kind='bar', ax=ax, width=0.8)
+        # Mode A: 4 bars - ND轉出, RF過剩轉出, 需求接收數量, 實際接收數量
+        expected_columns = ['ND轉出', 'RF過剩轉出', '需求接收數量', '實際接收數量']
     elif mode == 'enhanced':
-        # Enhanced mode: 5 bars
-        combined_data.plot(kind='bar', ax=ax, width=0.8)
+        # Mode B: 5 bars - ND轉出, RF過剩轉出, RF加強轉出, 需求接收數量, 實際接收數量
+        expected_columns = ['ND轉出', 'RF過剩轉出', 'RF加強轉出', '需求接收數量', '實際接收數量']
     else:  # special mode
-        # Special Enhanced mode: 5 bars (different types)
-        combined_data.plot(kind='bar', ax=ax, width=0.8)
-    
+        # Mode C: 5 bars - ND轉出, RF過剩轉出, RF特強轉出, 需求接收數量, 實際接收數量
+        expected_columns = ['ND轉出', 'RF過剩轉出', 'RF特強轉出', '需求接收數量', '實際接收數量']
+
+    # Filter and reorder columns according to requirements
+    available_columns = [col for col in expected_columns if col in combined_data.columns]
+    combined_data = combined_data[available_columns]
+
+    # Create bar chart
+    combined_data.plot(kind='bar', ax=ax, width=0.8)
+
     ax.set_title('Transfer Receive Analysis', fontsize=16, fontweight='bold')
-    ax.set_xlabel('OM Unit', fontsize=12)
-    ax.set_ylabel('Transfer Quantity', fontsize=12)
-    ax.legend(title='Transfer Type', bbox_to_anchor=(1.05, 1), loc='upper left')
+    ax.set_xlabel('OM單位', fontsize=12)
+    ax.set_ylabel('調貨數量', fontsize=12)
+    ax.legend(title='轉貨類型', bbox_to_anchor=(1.05, 1), loc='upper left')
     ax.grid(axis='y', alpha=0.3)
-    
+
     plt.xticks(rotation=45)
     plt.tight_layout()
-    
+
     return fig
 
 def export_to_excel(transfer_suggestions_df, stats):
-    """Export results to Excel file"""
+    """Export results to Excel file with exact format requirements"""
     output = io.BytesIO()
-    
+
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # Worksheet 1: Transfer Suggestions
-        transfer_suggestions_df.to_excel(writer, sheet_name='轉貨建議', index=False)
-        
-        # Worksheet 2: Statistics Summary
+        # Worksheet 1: Transfer Suggestions with specific column order
+        # Reorder columns according to requirements
+        required_columns = [
+            'Article', 'Product Desc', 'OM', 'Transfer Site', 'Transfer Qty',
+            'Transfer Site Original Stock', 'Transfer Site After Transfer Stock',
+            'Transfer Site Safety Stock', 'Transfer Site MOQ', 'Receive Site',
+            'Receive Site Target Qty', 'Notes'
+        ]
+
+        # Filter to only include columns that exist in the dataframe
+        available_columns = [col for col in required_columns if col in transfer_suggestions_df.columns]
+        export_df = transfer_suggestions_df[available_columns].copy()
+
+        # Rename columns to English for system compatibility
+        column_rename_map = {
+            'Article': 'Article',
+            'Product Desc': 'Product Description',
+            'OM': 'OM',
+            'Transfer Site': 'Transfer Site',
+            'Transfer Qty': 'Transfer Qty',
+            'Transfer Site Original Stock': 'Transfer Site Original Stock',
+            'Transfer Site After Transfer Stock': 'Transfer Site After Transfer Stock',
+            'Transfer Site Safety Stock': 'Transfer Site Safety Stock',
+            'Transfer Site MOQ': 'Transfer Site MOQ',
+            'Receive Site': 'Receive Site',
+            'Receive Site Target Qty': 'Receive Site Target Qty',
+            'Notes': 'Notes'
+        }
+
+        export_df = export_df.rename(columns=column_rename_map)
+        export_df.to_excel(writer, sheet_name='調貨建議', index=False)
+
+        # Worksheet 2: Statistics Summary with proper spacing
         workbook = writer.book
         stats_worksheet = workbook.add_worksheet('統計摘要')
-        
+
         # KPI Overview
-        stats_worksheet.write('A1', 'KPI概覽')
-        stats_worksheet.write('A2', '總轉貨建議數量')
-        stats_worksheet.write('B2', stats['total_transfer_qty'])
-        stats_worksheet.write('A3', '總轉貨件數')
-        stats_worksheet.write('B3', stats['total_transfer_lines'])
-        stats_worksheet.write('A4', '涉及產品數量')
-        stats_worksheet.write('B4', stats['unique_articles'])
-        stats_worksheet.write('A5', '涉及OM數量')
-        stats_worksheet.write('B5', stats['unique_oms'])
-        
+        row = 0
+        stats_worksheet.write(row, 0, 'KPI Overview')
+        stats_worksheet.write(row, 1, '總轉貨建議數量')
+        stats_worksheet.write(row, 2, stats['total_transfer_qty'])
+        row += 1
+        stats_worksheet.write(row, 1, '總轉貨件數')
+        stats_worksheet.write(row, 2, stats['total_transfer_lines'])
+        row += 1
+        stats_worksheet.write(row, 1, '涉及產品數量')
+        stats_worksheet.write(row, 2, stats['unique_articles'])
+        row += 1
+        stats_worksheet.write(row, 1, '涉及OM數量')
+        stats_worksheet.write(row, 2, stats['unique_oms'])
+        row += 1
+
+        # Leave 3 blank rows
+        row += 3
+
         # Article Statistics
-        row = 8
-        stats_worksheet.write(f'A{row}', '按產品統計')
-        row += 1
         if not stats['article_stats'].empty:
-            stats['article_stats'].to_excel(writer, sheet_name='統計摘要', startrow=row, startcol=0)
-            row += len(stats['article_stats']) + 4
-        
+            stats_worksheet.write(row, 0, 'Statistics by Article')
+            row += 1
+            # Write headers
+            headers = ['Article', '總需求件數', '總調貨件數', '涉及OM數量', '轉貨行數', '需求滿足率', '約束違規']
+            for col_num, header in enumerate(headers):
+                stats_worksheet.write(row, col_num, header)
+            row += 1
+
+            # Write data
+            for article in stats['article_stats'].index:
+                base_col = 0
+                stats_worksheet.write(row, base_col, article)
+                stats_worksheet.write(row, base_col + 1, stats['article_stats'].loc[article, '總需求件數'])
+                stats_worksheet.write(row, base_col + 2, stats['article_stats'].loc[article, '總調貨件數'])
+                stats_worksheet.write(row, base_col + 3, stats['article_stats'].loc[article, '涉及OM數量'])
+                stats_worksheet.write(row, base_col + 4, stats['article_stats'].loc[article, '轉貨行數'])
+                stats_worksheet.write(row, base_col + 5, stats['article_stats'].loc[article, '需求滿足率'])
+                stats_worksheet.write(row, base_col + 6, '是' if stats['article_stats'].loc[article, '約束違規'] else '否')
+                row += 1
+
+            row += 3  # Leave 3 blank rows
+
         # OM Statistics
-        stats_worksheet.write(f'A{row}', '按OM統計')
-        row += 1
         if not stats['om_stats'].empty:
-            stats['om_stats'].to_excel(writer, sheet_name='統計摘要', startrow=row, startcol=0)
-            row += len(stats['om_stats']) + 4
-        
+            stats_worksheet.write(row, 0, 'Statistics by OM')
+            row += 1
+            # Write headers
+            headers = ['OM', '總需求件數', '總調貨件數', '涉及產品數量', '轉貨行數']
+            for col_num, header in enumerate(headers):
+                stats_worksheet.write(row, col_num, header)
+            row += 1
+
+            # Write data
+            for om in stats['om_stats'].index:
+                base_col = 0
+                stats_worksheet.write(row, base_col, om)
+                stats_worksheet.write(row, base_col + 1, stats['om_stats'].loc[om, '總需求件數'])
+                stats_worksheet.write(row, base_col + 2, stats['om_stats'].loc[om, '總調貨件數'])
+                stats_worksheet.write(row, base_col + 3, stats['om_stats'].loc[om, '涉及產品數量'])
+                stats_worksheet.write(row, base_col + 4, stats['om_stats'].loc[om, '轉貨行數'])
+                row += 1
+
+            row += 3  # Leave 3 blank rows
+
         # Transfer Type Distribution
-        stats_worksheet.write(f'A{row}', '轉出類型分佈')
-        row += 1
         if not stats['transfer_type_stats'].empty:
-            stats['transfer_type_stats'].to_excel(writer, sheet_name='統計摘要', startrow=row, startcol=0)
-            row += len(stats['transfer_type_stats']) + 4
-        
+            stats_worksheet.write(row, 0, 'Transfer Type Distribution')
+            row += 1
+            # Write headers
+            headers = ['Transfer Type', '總件數', '涉及行數']
+            for col_num, header in enumerate(headers):
+                stats_worksheet.write(row, col_num, header)
+            row += 1
+
+            # Write data
+            for transfer_type in stats['transfer_type_stats'].index:
+                base_col = 0
+                stats_worksheet.write(row, base_col, transfer_type)
+                stats_worksheet.write(row, base_col + 1, stats['transfer_type_stats'].loc[transfer_type, '總件數'])
+                stats_worksheet.write(row, base_col + 2, stats['transfer_type_stats'].loc[transfer_type, '涉及行數'])
+                row += 1
+
+            row += 3  # Leave 3 blank rows
+
         # Receive Type Distribution
-        stats_worksheet.write(f'A{row}', '接收類型分佈')
-        row += 1
         if not stats['receive_stats'].empty:
-            stats['receive_stats'].to_excel(writer, sheet_name='統計摘要', startrow=row, startcol=0)
-    
+            stats_worksheet.write(row, 0, 'Receive Type Distribution')
+            row += 1
+            # Write headers
+            headers = ['Receive Site', '實際接收數量', '目標需求數量', '需求滿足率']
+            for col_num, header in enumerate(headers):
+                stats_worksheet.write(row, col_num, header)
+            row += 1
+
+            # Write data
+            for receive_site in stats['receive_stats'].index:
+                base_col = 0
+                stats_worksheet.write(row, base_col, receive_site)
+                stats_worksheet.write(row, base_col + 1, stats['receive_stats'].loc[receive_site, '實際接收數量'])
+                stats_worksheet.write(row, base_col + 2, stats['receive_stats'].loc[receive_site, '目標需求數量'])
+                stats_worksheet.write(row, base_col + 3, stats['receive_stats'].loc[receive_site, '需求滿足率'])
+                row += 1
+
     output.seek(0)
     return output
 
 # Main application
 def main():
     # Page header
-    st.title("📦 強制指定店鋪轉貨系統")
+    st.title("📦 調貨建議生成系統")
     st.markdown("---")
     
     # Sidebar
     st.sidebar.header("系統資訊")
     st.sidebar.info("""
-    **版本：v1.0**
-    **開發者:Ricky**
-    
-    **核心功能：**  
-    - ✅ ND/RF類型智慧識別
-    - ✅ 優先順序轉貨
-    - ✅ 統計分析和圖表
-    - ✅ Excel格式匯出
-    """)
+**版本：v1.0**
+**開發者:Ricky**
+
+**核心功能：**
+- ✅ ND/RF類型智慧識別
+- ✅ 優先順序轉貨
+- ✅ 統計分析和圖表
+- ✅ Excel格式匯出
+""")
     
     # File upload section
     st.header("1. 資料上傳")
