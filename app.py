@@ -648,13 +648,13 @@ def main():
                     st.warning(f"⚠️ {error_info['message']}")
 
                     # Show suggestions in expandable section
-                    with st.expansion_container("疑難排解建議"):
+                    with st.expander("疑難排解建議"):
                         st.write("**建議解決方案：**")
                         for suggestion in error_info['suggestions']:
                             st.write(f"• {suggestion}")
 
                     # Log the diagnostic information (for developers)
-                    with st.expansion_container("技術診斷資訊"):
+                    with st.expander("技術診斷資訊"):
                         st.json(error_info['diagnostic'])
                 
                 # Statistics tables
