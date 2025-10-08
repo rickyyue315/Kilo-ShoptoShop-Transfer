@@ -292,16 +292,19 @@ def handle_no_transfer_candidates(transfer_out_df, transfer_in_df, mode):
     return error_response
 
 def match_transfers(transfer_out_df, transfer_in_df, original_df):
-    """Match transfer-out and transfer-in candidates"""
+    """Match transfer-out and transfer-in candidates with proper demand constraint"""
     transfer_suggestions = []
 
     # Check if either dataframe is empty
     if transfer_out_df.empty or transfer_in_df.empty:
         return pd.DataFrame(transfer_suggestions)
 
-    # Group by Article (not by Article and OM) to apply constraint at article level
+    # Make a copy of transfer_in_df to avoid modifying original
+    transfer_in_df_copy = transfer_in_df.copy()
+
+    # Group by Article to apply constraint at article level
     out_grouped = transfer_out_df.groupby(['Article'])
-    in_grouped = transfer_in_df.groupby(['Article'])
+    in_grouped = transfer_in_df_copy.groupby(['Article'])
 
     for article, out_group in out_grouped:
         if article in in_grouped.groups:
@@ -311,7 +314,6 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
             total_demand = in_group['Required Qty'].sum()
 
             # Get all transfer-out candidates for this article across all OMs
-            # Sort by OM, then by Transfer Type and Effective Sales
             out_group_sorted = out_group.sort_values(['OM', 'Transfer Type', 'Effective Sales'],
                                                    ascending=[True, True, True])
 
@@ -321,11 +323,11 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
             # Track total transferred for this article across all OMs
             total_transferred = 0
 
-            # Match transfers
+            # Match transfers with proper constraint enforcement
             for _, out_store in out_group_sorted.iterrows():
                 remaining_qty = out_store['Transfer Qty']
 
-                for _, in_store in in_group_sorted.iterrows():
+                for idx, in_store in in_group_sorted.iterrows():
                     if remaining_qty <= 0:
                         break
 
@@ -333,14 +335,14 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                     if out_store['Site'] == in_store['Site']:
                         continue
 
-                    # Calculate transfer quantity (don't exceed demand)
-                    transfer_qty = min(remaining_qty, in_store['Required Qty'])
+                    # Calculate potential transfer quantity
+                    potential_transfer_qty = min(remaining_qty, in_store['Required Qty'])
 
-                    # Additional constraint: don't exceed total demand for this article
-                    if total_transferred + transfer_qty > total_demand:
-                        transfer_qty = max(0, total_demand - total_transferred)
+                    # Apply global demand constraint for this article
+                    if total_transferred + potential_transfer_qty > total_demand:
+                        potential_transfer_qty = max(0, total_demand - total_transferred)
 
-                    if transfer_qty > 0:
+                    if potential_transfer_qty > 0:
                         # Get product description from original data
                         product_desc = original_df[original_df['Article'] == article]['Article Description'].iloc[0]
 
@@ -349,9 +351,9 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                             'Product Desc': product_desc,
                             'OM': out_store['OM'],
                             'Transfer Site': out_store['Site'],
-                            'Transfer Qty': transfer_qty,
+                            'Transfer Qty': potential_transfer_qty,
                             'Transfer Site Original Stock': out_store['Original Stock'],
-                            'Transfer Site After Transfer Stock': out_store['Original Stock'] - transfer_qty,
+                            'Transfer Site After Transfer Stock': out_store['Original Stock'] - potential_transfer_qty,
                             'Transfer Site Safety Stock': out_store['Safety Stock'],
                             'Transfer Site MOQ': out_store['MOQ'],
                             'Receive Site': in_store['Site'],
@@ -361,15 +363,19 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                         })
 
                         # Update tracking variables
-                        remaining_qty -= transfer_qty
-                        total_transferred += transfer_qty
-                        # Update the required quantity for the receiving store
-                        in_store['Required Qty'] -= transfer_qty
+                        remaining_qty -= potential_transfer_qty
+                        total_transferred += potential_transfer_qty
+
+                        # Update the required quantity for the receiving store (in copy)
+                        transfer_in_df_copy.loc[idx, 'Required Qty'] -= potential_transfer_qty
+
+                        # Update the sorted in_group for next iteration
+                        in_group_sorted.loc[idx, 'Required Qty'] -= potential_transfer_qty
 
     return pd.DataFrame(transfer_suggestions)
 
 def calculate_statistics(transfer_suggestions_df, mode):
-    """Calculate comprehensive statistics"""
+    """Calculate comprehensive statistics with demand constraint validation"""
     if transfer_suggestions_df.empty:
         return {
             'total_transfer_qty': 0,
@@ -379,19 +385,38 @@ def calculate_statistics(transfer_suggestions_df, mode):
             'article_stats': pd.DataFrame(),
             'om_stats': pd.DataFrame(),
             'transfer_type_stats': pd.DataFrame(),
-            'receive_stats': pd.DataFrame()
+            'receive_stats': pd.DataFrame(),
+            'constraint_violations': 0,
+            'violation_details': []
         }
-    
+
     # Basic KPIs
     total_transfer_qty = transfer_suggestions_df['Transfer Qty'].sum()
     total_transfer_lines = len(transfer_suggestions_df)
     unique_articles = transfer_suggestions_df['Article'].nunique()
     unique_oms = transfer_suggestions_df['OM'].nunique()
-    
-    # Calculate total demand by Article
-    total_demand_by_article = transfer_suggestions_df.groupby('Article')['Receive Site Target Qty'].first().sum()
-    
-    # Statistics by Article (updated with new requirements)
+
+    # Calculate total demand by Article for constraint validation
+    total_demand_by_article = transfer_suggestions_df.groupby('Article')['Receive Site Target Qty'].first()
+    total_transfer_by_article = transfer_suggestions_df.groupby('Article')['Transfer Qty'].sum()
+
+    # Check for constraint violations
+    constraint_violations = 0
+    violation_details = []
+
+    for article in total_demand_by_article.index:
+        demand = total_demand_by_article[article]
+        transfer = total_transfer_by_article.get(article, 0)
+        if transfer > demand:
+            constraint_violations += 1
+            violation_details.append({
+                'Article': article,
+                'Total Demand': demand,
+                'Total Transfer': transfer,
+                'Violation': transfer - demand
+            })
+
+    # Statistics by Article (updated with constraint validation)
     article_stats = transfer_suggestions_df.groupby('Article').agg({
         'Receive Site Target Qty': 'first',  # Total demand
         'Transfer Qty': 'sum',  # Total transfer
@@ -399,7 +424,8 @@ def calculate_statistics(transfer_suggestions_df, mode):
     }).round(2)
     article_stats.columns = ['總需求件數', '總調貨件數', '涉及OM數量']
     article_stats['轉貨行數'] = transfer_suggestions_df.groupby('Article').size()
-    article_stats['Fullfillment Rate'] = (article_stats['總調貨件數'] / article_stats['總需求件數'] * 100).round(2)
+    article_stats['需求滿足率'] = (article_stats['總調貨件數'] / article_stats['總需求件數'] * 100).round(2)
+    article_stats['約束違規'] = [(total_transfer_by_article.get(article, 0) > article_stats.loc[article, '總需求件數']) for article in article_stats.index]
     
     # Statistics by OM (updated with new requirements)
     om_stats = transfer_suggestions_df.groupby('OM').agg({
@@ -432,7 +458,9 @@ def calculate_statistics(transfer_suggestions_df, mode):
         'article_stats': article_stats,
         'om_stats': om_stats,
         'transfer_type_stats': transfer_type_stats,
-        'receive_stats': receive_stats
+        'receive_stats': receive_stats,
+        'constraint_violations': constraint_violations,
+        'violation_details': violation_details
     }
 
 def create_visualization(stats, transfer_suggestions_df, mode):
@@ -624,7 +652,23 @@ def main():
                 
                 # Results section
                 st.header("5. 分析結果")
-                
+
+                # Check for constraint violations
+                if stats.get('constraint_violations', 0) > 0:
+                    st.error(f"⚠️ 發現 {stats['constraint_violations']} 個約束違規：總轉出數量超過總需求數量")
+
+                    # Show violation details in expandable section
+                    with st.expander("約束違規詳情"):
+                        for violation in stats.get('violation_details', []):
+                            st.write(f"**產品 {violation['Article']}**:")
+                            st.write(f"  - 總需求: {violation['Total Demand']}")
+                            st.write(f"  - 總轉出: {violation['Total Transfer']}")
+                            st.write(f"  - 違規數量: {violation['Violation']}")
+                else:
+                    # Add constraint compliance indicator
+                    if stats.get('total_transfer_qty', 0) > 0:
+                        st.success("✅ 所有轉貨建議均符合需求約束")
+
                 # KPI metrics
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
