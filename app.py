@@ -238,30 +238,30 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
             
             # Track total transferred for this article
             total_transferred = 0
-            
+
             # Match transfers
             for _, out_store in out_group_sorted.iterrows():
                 remaining_qty = out_store['Transfer Qty']
-                
+
                 for _, in_store in in_group_sorted.iterrows():
                     if remaining_qty <= 0:
                         break
-                    
+
                     # Avoid self-transfer
                     if out_store['Site'] == in_store['Site']:
                         continue
-                    
+
                     # Calculate transfer quantity (don't exceed demand)
                     transfer_qty = min(remaining_qty, in_store['Required Qty'])
-                    
+
                     # Additional constraint: don't exceed total demand
                     if total_transferred + transfer_qty > total_demand:
                         transfer_qty = max(0, total_demand - total_transferred)
-                    
+
                     if transfer_qty > 0:
                         # Get product description from original data
                         product_desc = original_df[original_df['Article'] == article]['Article Description'].iloc[0]
-                        
+
                         transfer_suggestions.append({
                             'Article': article,
                             'Product Desc': product_desc,
@@ -277,8 +277,10 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                             'Transfer Type': out_store['Transfer Type'],
                             'Notes': f"從{out_store['Site']}轉移至{in_store['Site']}"
                         })
-                        
+
+                        # Update tracking variables
                         remaining_qty -= transfer_qty
+                        total_transferred += transfer_qty
                         # Update the required quantity for the receiving store
                         in_store['Required Qty'] -= transfer_qty
     

@@ -15,7 +15,7 @@ def create_test_data():
         'OM': ['Candy', 'Candy', 'Candy', 'Candy'],
         'MOQ': [6, 6, 6, 6],
         'SaSa Net Stock': [16, 9, 6, 0],
-        'Target': [0, 0, 30, 0],
+        'Target': [0, 0, 15, 0],  # Reduced target to 15 to test constraint
         'Pending Received': [0, 0, 0, 0],
         'Safety Stock': [0, 8, 8, 8],
         'Last Month Sold Qty': [0, 1, 0, 3],
