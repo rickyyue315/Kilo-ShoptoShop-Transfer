@@ -93,6 +93,9 @@ def identify_transfer_out_candidates(df, mode='conservative'):
         # Calculate effective sales for each store
         group['Effective Sales'] = group.apply(calculate_effective_sales, axis=1)
         
+        # Calculate max sales for this article across all stores
+        max_sales = group['Effective Sales'].max()
+        
         # Priority 1: ND Type Complete Transfer Out
         nd_stores = group[group['RP Type'] == 'ND']
         for _, store in nd_stores.iterrows():
@@ -142,7 +145,7 @@ def identify_transfer_out_candidates(df, mode='conservative'):
                             'Pending Received': store['Pending Received']
                         })
             
-            else:  # enhanced mode
+            elif mode == 'enhanced':
                 # Enhanced approach
                 if total_available > (store['MOQ'] + 1):
                     base_transferable = total_available - (store['MOQ'] + 1)
@@ -155,6 +158,29 @@ def identify_transfer_out_candidates(df, mode='conservative'):
                             'OM': om,
                             'Site': store['Site'],
                             'Transfer Type': 'RF加強轉出',
+                            'Available Stock': store['SaSa Net Stock'],
+                            'Transfer Qty': actual_transfer,
+                            'Effective Sales': store['Effective Sales'],
+                            'Original Stock': store['SaSa Net Stock'],
+                            'Safety Stock': store['Safety Stock'],
+                            'MOQ': store['MOQ'],
+                            'Pending Received': store['Pending Received']
+                        })
+            
+            else:  # special enhanced mode
+                # Special Enhanced approach (特強轉貨)
+                if total_available > 0 and store['Effective Sales'] < max_sales:
+                    # Base transferable = Transfer Qty - (Stock + In Transit) leaving 2 units
+                    base_transferable = store['SaSa Net Stock'] - 2
+                    max_transferable = int(total_available * 0.9)
+                    actual_transfer = min(base_transferable, max_transferable, store['SaSa Net Stock'])
+                    
+                    if actual_transfer > 0:
+                        transfer_out_candidates.append({
+                            'Article': article,
+                            'OM': om,
+                            'Site': store['Site'],
+                            'Transfer Type': 'RF特強轉出',
                             'Available Stock': store['SaSa Net Stock'],
                             'Transfer Qty': actual_transfer,
                             'Effective Sales': store['Effective Sales'],
@@ -188,7 +214,7 @@ def identify_transfer_in_candidates(df):
     
     return pd.DataFrame(transfer_in_candidates)
 
-def match_transfers(transfer_out_df, transfer_in_df):
+def match_transfers(transfer_out_df, transfer_in_df, original_df):
     """Match transfer-out and transfer-in candidates"""
     transfer_suggestions = []
     
@@ -201,7 +227,7 @@ def match_transfers(transfer_out_df, transfer_in_df):
             in_group = in_grouped.get_group((article, om))
             
             # Sort transfer-out by priority (ND first, then RF by lowest sales)
-            out_group_sorted = out_group.sort_values(['Transfer Type', 'Effective Sales'], 
+            out_group_sorted = out_group.sort_values(['Transfer Type', 'Effective Sales'],
                                                    ascending=[True, True])
             
             # Sort transfer-in by priority (highest sales first)
@@ -224,7 +250,7 @@ def match_transfers(transfer_out_df, transfer_in_df):
                     
                     if transfer_qty > 0:
                         # Get product description from original data
-                        product_desc = df[df['Article'] == article]['Article Description'].iloc[0]
+                        product_desc = original_df[original_df['Article'] == article]['Article Description'].iloc[0]
                         
                         transfer_suggestions.append({
                             'Article': article,
@@ -268,27 +294,35 @@ def calculate_statistics(transfer_suggestions_df, mode):
     unique_articles = transfer_suggestions_df['Article'].nunique()
     unique_oms = transfer_suggestions_df['OM'].nunique()
     
-    # Statistics by Article
+    # Calculate total demand by Article
+    total_demand_by_article = transfer_suggestions_df.groupby('Article')['Receive Site Target Qty'].first().sum()
+    
+    # Statistics by Article (updated with new requirements)
     article_stats = transfer_suggestions_df.groupby('Article').agg({
-        'Transfer Qty': ['sum', 'count'],
-        'OM': 'nunique'
+        'Receive Site Target Qty': 'first',  # Total demand
+        'Transfer Qty': 'sum',  # Total transfer
+        'OM': 'nunique'  # Number of OMs involved
     }).round(2)
-    article_stats.columns = ['總轉貨件數', '轉貨行數', '涉及OM數量']
+    article_stats.columns = ['總需求件數', '總調貨件數', '涉及OM數量']
+    article_stats['轉貨行數'] = transfer_suggestions_df.groupby('Article').size()
+    article_stats['Fullfillment Rate'] = (article_stats['總調貨件數'] / article_stats['總需求件數'] * 100).round(2)
     
-    # Statistics by OM
+    # Statistics by OM (updated with new requirements)
     om_stats = transfer_suggestions_df.groupby('OM').agg({
-        'Transfer Qty': ['sum', 'count'],
-        'Article': 'nunique'
+        'Receive Site Target Qty': 'first',  # Total demand
+        'Transfer Qty': 'sum',  # Total transfer
+        'Article': 'nunique'  # Number of products involved
     }).round(2)
-    om_stats.columns = ['總轉貨件數', '轉貨行數', '涉及產品數量']
+    om_stats.columns = ['總需求件數', '總調貨件數', '涉及產品數量']
+    om_stats['轉貨行數'] = transfer_suggestions_df.groupby('OM').size()
     
-    # Transfer type distribution
+    # Transfer type distribution (updated for all three modes)
     transfer_type_stats = transfer_suggestions_df.groupby('Transfer Type').agg({
         'Transfer Qty': ['sum', 'count']
     }).round(2)
     transfer_type_stats.columns = ['總件數', '涉及行數']
     
-    # Receive statistics
+    # Receive statistics (updated with new requirements)
     receive_stats = transfer_suggestions_df.groupby('Receive Site').agg({
         'Transfer Qty': 'sum',
         'Receive Site Target Qty': 'first'
@@ -334,8 +368,11 @@ def create_visualization(stats, transfer_suggestions_df, mode):
     if mode == 'conservative':
         # Conservative mode: 4 bars
         combined_data.plot(kind='bar', ax=ax, width=0.8)
-    else:
+    elif mode == 'enhanced':
         # Enhanced mode: 5 bars
+        combined_data.plot(kind='bar', ax=ax, width=0.8)
+    else:  # special mode
+        # Special Enhanced mode: 5 bars (different types)
         combined_data.plot(kind='bar', ax=ax, width=0.8)
     
     ax.set_title('Transfer Receive Analysis', fontsize=16, fontweight='bold')
@@ -470,9 +507,9 @@ def main():
             st.header("3. 轉貨模式選擇")
             mode = st.radio(
                 "請選擇轉貨模式：",
-                options=["conservative", "enhanced"],
-                format_func=lambda x: "A: 保守轉貨" if x == "conservative" else "B: 加強轉貨",
-                help="保守轉貨：RF類型轉出限制為50% | 加強轉貨：RF類型轉出限制為80%"
+                options=["conservative", "enhanced", "special"],
+                format_func=lambda x: "A: 保守轉貨" if x == "conservative" else ("B: 加強轉貨" if x == "enhanced" else "C: 特強轉貨"),
+                help="保守轉貨：RF類型轉出限制為50% | 加強轉貨：RF類型轉出限制為80% | 特強轉貨：RF類型轉出限制為90%並保留2件庫存"
             )
             
             # Analysis button
@@ -484,7 +521,7 @@ def main():
                     transfer_in_df = identify_transfer_in_candidates(df)
                     
                     # Match transfers
-                    transfer_suggestions_df = match_transfers(transfer_out_df, transfer_in_df)
+                    transfer_suggestions_df = match_transfers(transfer_out_df, transfer_in_df, df)
                     
                     # Calculate statistics
                     stats = calculate_statistics(transfer_suggestions_df, mode)
