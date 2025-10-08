@@ -85,17 +85,23 @@ def calculate_effective_sales(row):
 def identify_transfer_out_candidates(df, mode='conservative'):
     """Identify transfer-out candidates based on selected mode"""
     transfer_out_candidates = []
-    
+
+    # First, calculate total demand for each article across all OMs
+    total_demand_by_article = df[df['Target'] > 0].groupby('Article')['Target'].sum()
+
     # Group by Article and OM for processing
     grouped = df.groupby(['Article', 'OM'])
-    
+
     for (article, om), group in grouped:
         # Calculate effective sales for each store
         group['Effective Sales'] = group.apply(calculate_effective_sales, axis=1)
-        
-        # Calculate max sales for this article across all stores
+
+        # Calculate max sales for this article across all stores in this OM
         max_sales = group['Effective Sales'].max()
-        
+
+        # Get total demand for this article across all OMs
+        article_total_demand = total_demand_by_article.get(article, 0)
+
         # Priority 1: ND Type Complete Transfer Out
         nd_stores = group[group['RP Type'] == 'ND']
         for _, store in nd_stores.iterrows():
@@ -111,25 +117,26 @@ def identify_transfer_out_candidates(df, mode='conservative'):
                     'Original Stock': store['SaSa Net Stock'],
                     'Safety Stock': store['Safety Stock'],
                     'MOQ': store['MOQ'],
-                    'Pending Received': store['Pending Received']
+                    'Pending Received': store['Pending Received'],
+                    'Article Total Demand': article_total_demand
                 })
-        
+
         # Priority 2: RF Type Transfer Out (different logic for conservative vs enhanced)
         rf_stores = group[group['RP Type'] == 'RF']
-        
+
         # Sort by effective sales (lowest first for transfer-out priority)
         rf_stores_sorted = rf_stores.sort_values('Effective Sales', ascending=True)
-        
+
         for _, store in rf_stores_sorted.iterrows():
             total_available = store['SaSa Net Stock'] + store['Pending Received']
-            
+
             if mode == 'conservative':
                 # Conservative approach
                 if total_available > store['Safety Stock']:
                     base_transferable = total_available - store['Safety Stock']
                     max_transferable = int(total_available * 0.5)
                     actual_transfer = min(base_transferable, max_transferable, store['SaSa Net Stock'])
-                    
+
                     if actual_transfer > 0:
                         transfer_out_candidates.append({
                             'Article': article,
@@ -142,16 +149,17 @@ def identify_transfer_out_candidates(df, mode='conservative'):
                             'Original Stock': store['SaSa Net Stock'],
                             'Safety Stock': store['Safety Stock'],
                             'MOQ': store['MOQ'],
-                            'Pending Received': store['Pending Received']
+                            'Pending Received': store['Pending Received'],
+                            'Article Total Demand': article_total_demand
                         })
-            
+
             elif mode == 'enhanced':
                 # Enhanced approach
                 if total_available > (store['MOQ'] + 1):
                     base_transferable = total_available - (store['MOQ'] + 1)
                     max_transferable = int(total_available * 0.8)
                     actual_transfer = min(base_transferable, max_transferable, store['SaSa Net Stock'])
-                    
+
                     if actual_transfer > 0:
                         transfer_out_candidates.append({
                             'Article': article,
@@ -164,9 +172,10 @@ def identify_transfer_out_candidates(df, mode='conservative'):
                             'Original Stock': store['SaSa Net Stock'],
                             'Safety Stock': store['Safety Stock'],
                             'MOQ': store['MOQ'],
-                            'Pending Received': store['Pending Received']
+                            'Pending Received': store['Pending Received'],
+                            'Article Total Demand': article_total_demand
                         })
-            
+
             else:  # special enhanced mode
                 # Special Enhanced approach (特強轉貨)
                 if total_available > 0 and store['Effective Sales'] < max_sales:
@@ -174,7 +183,7 @@ def identify_transfer_out_candidates(df, mode='conservative'):
                     base_transferable = store['SaSa Net Stock'] - 2
                     max_transferable = int(total_available * 0.9)
                     actual_transfer = min(base_transferable, max_transferable, store['SaSa Net Stock'])
-                    
+
                     if actual_transfer > 0:
                         transfer_out_candidates.append({
                             'Article': article,
@@ -187,9 +196,10 @@ def identify_transfer_out_candidates(df, mode='conservative'):
                             'Original Stock': store['SaSa Net Stock'],
                             'Safety Stock': store['Safety Stock'],
                             'MOQ': store['MOQ'],
-                            'Pending Received': store['Pending Received']
+                            'Pending Received': store['Pending Received'],
+                            'Article Total Demand': article_total_demand
                         })
-    
+
     return pd.DataFrame(transfer_out_candidates)
 
 def identify_transfer_in_candidates(df):
@@ -217,26 +227,27 @@ def identify_transfer_in_candidates(df):
 def match_transfers(transfer_out_df, transfer_in_df, original_df):
     """Match transfer-out and transfer-in candidates"""
     transfer_suggestions = []
-    
-    # Group by Article and OM
-    out_grouped = transfer_out_df.groupby(['Article', 'OM'])
-    in_grouped = transfer_in_df.groupby(['Article', 'OM'])
-    
-    for (article, om), out_group in out_grouped:
-        if (article, om) in in_grouped.groups:
-            in_group = in_grouped.get_group((article, om))
-            
-            # Calculate total demand for this article
+
+    # Group by Article (not by Article and OM) to apply constraint at article level
+    out_grouped = transfer_out_df.groupby(['Article'])
+    in_grouped = transfer_in_df.groupby(['Article'])
+
+    for article, out_group in out_grouped:
+        if article in in_grouped.groups:
+            in_group = in_grouped.get_group(article)
+
+            # Calculate total demand for this article across all OMs
             total_demand = in_group['Required Qty'].sum()
-            
-            # Sort transfer-out by priority (ND first, then RF by lowest sales)
-            out_group_sorted = out_group.sort_values(['Transfer Type', 'Effective Sales'],
-                                                   ascending=[True, True])
-            
-            # Sort transfer-in by priority (highest sales first)
-            in_group_sorted = in_group.sort_values('Effective Sales', ascending=False)
-            
-            # Track total transferred for this article
+
+            # Get all transfer-out candidates for this article across all OMs
+            # Sort by OM, then by Transfer Type and Effective Sales
+            out_group_sorted = out_group.sort_values(['OM', 'Transfer Type', 'Effective Sales'],
+                                                   ascending=[True, True, True])
+
+            # Sort transfer-in by OM, then by Effective Sales (highest first)
+            in_group_sorted = in_group.sort_values(['OM', 'Effective Sales'], ascending=[True, False])
+
+            # Track total transferred for this article across all OMs
             total_transferred = 0
 
             # Match transfers
@@ -254,7 +265,7 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                     # Calculate transfer quantity (don't exceed demand)
                     transfer_qty = min(remaining_qty, in_store['Required Qty'])
 
-                    # Additional constraint: don't exceed total demand
+                    # Additional constraint: don't exceed total demand for this article
                     if total_transferred + transfer_qty > total_demand:
                         transfer_qty = max(0, total_demand - total_transferred)
 
@@ -265,7 +276,7 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                         transfer_suggestions.append({
                             'Article': article,
                             'Product Desc': product_desc,
-                            'OM': om,
+                            'OM': out_store['OM'],
                             'Transfer Site': out_store['Site'],
                             'Transfer Qty': transfer_qty,
                             'Transfer Site Original Stock': out_store['Original Stock'],
@@ -283,7 +294,7 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                         total_transferred += transfer_qty
                         # Update the required quantity for the receiving store
                         in_store['Required Qty'] -= transfer_qty
-    
+
     return pd.DataFrame(transfer_suggestions)
 
 def calculate_statistics(transfer_suggestions_df, mode):
