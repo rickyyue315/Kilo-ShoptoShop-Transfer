@@ -224,9 +224,80 @@ def identify_transfer_in_candidates(df):
     
     return pd.DataFrame(transfer_in_candidates)
 
+def handle_no_transfer_candidates(transfer_out_df, transfer_in_df, mode):
+    """Handle scenario when no eligible transfer candidates are found"""
+    import logging
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger(__name__)
+
+    # Analyze the situation
+    no_out_candidates = transfer_out_df.empty
+    no_in_candidates = transfer_in_df.empty
+
+    # Create diagnostic information
+    diagnostic_info = {
+        'mode': mode,
+        'transfer_out_count': len(transfer_out_df),
+        'transfer_in_count': len(transfer_in_df),
+        'reason': 'unknown'
+    }
+
+    if no_out_candidates and no_in_candidates:
+        diagnostic_info['reason'] = 'no_eligible_candidates'
+        message = "沒有找到符合轉出或轉入條件的候選商店。請檢查資料是否包含：\n" \
+                 "• ND類型且庫存大於0的產品\n" \
+                 "• 具有目標需求量的產品"
+    elif no_out_candidates:
+        diagnostic_info['reason'] = 'no_transfer_out_candidates'
+        message = "沒有找到符合轉出條件的候選商店。請檢查：\n" \
+                 "• 是否有ND類型產品且庫存大於0\n" \
+                 "• RF類型產品是否滿足轉出條件（依所選模式而定）"
+    elif no_in_candidates:
+        diagnostic_info['reason'] = 'no_transfer_in_candidates'
+        message = "沒有找到符合轉入條件的候選商店。請檢查：\n" \
+                 "• 是否有產品設置了目標需求量（Target > 0）"
+    else:
+        # Check for common articles between out and in candidates
+        out_articles = set(transfer_out_df['Article'].unique())
+        in_articles = set(transfer_in_df['Article'].unique())
+        common_articles = out_articles.intersection(in_articles)
+
+        if not common_articles:
+            diagnostic_info['reason'] = 'no_common_articles'
+            message = "沒有找到可以匹配的產品。轉出候選和轉入候選的產品沒有重疊。"
+        else:
+            diagnostic_info['reason'] = 'om_constraint_violation'
+            message = "沒有找到符合OM約束的轉貨機會。系統要求轉出和轉入必須在同一OM單位內。"
+
+    # Log diagnostic information
+    logger.info(f"No transfer suggestions generated for mode: {mode}")
+    logger.info(f"Diagnostic info: {diagnostic_info}")
+
+    # Create user-friendly error response
+    error_response = {
+        'success': False,
+        'message': message,
+        'diagnostic': diagnostic_info,
+        'suggestions': [
+            "檢查Excel檔案是否包含所有必要欄位",
+            "確認是否有ND類型產品且庫存大於0",
+            "確認是否有產品設置了目標需求量",
+            "檢查轉出和轉入產品是否屬於同一OM單位",
+            "驗證資料格式是否正確（數值欄位應為數字）"
+        ]
+    }
+
+    return error_response
+
 def match_transfers(transfer_out_df, transfer_in_df, original_df):
     """Match transfer-out and transfer-in candidates"""
     transfer_suggestions = []
+
+    # Check if either dataframe is empty
+    if transfer_out_df.empty or transfer_in_df.empty:
+        return pd.DataFrame(transfer_suggestions)
 
     # Group by Article (not by Article and OM) to apply constraint at article level
     out_grouped = transfer_out_df.groupby(['Article'])
@@ -570,46 +641,64 @@ def main():
                 if not transfer_suggestions_df.empty:
                     st.dataframe(transfer_suggestions_df, use_container_width=True)
                 else:
-                    st.info("沒有找到符合條件的轉貨建議")
+                    # Use the new error handling function
+                    error_info = handle_no_transfer_candidates(transfer_out_df, transfer_in_df, mode)
+
+                    # Display user-friendly message
+                    st.warning(f"⚠️ {error_info['message']}")
+
+                    # Show suggestions in expandable section
+                    with st.expansion_container("疑難排解建議"):
+                        st.write("**建議解決方案：**")
+                        for suggestion in error_info['suggestions']:
+                            st.write(f"• {suggestion}")
+
+                    # Log the diagnostic information (for developers)
+                    with st.expansion_container("技術診斷資訊"):
+                        st.json(error_info['diagnostic'])
                 
                 # Statistics tables
                 st.subheader("統計分析")
-                
-                if not stats['article_stats'].empty:
-                    st.write("**按產品統計**")
-                    st.dataframe(stats['article_stats'])
-                
-                if not stats['om_stats'].empty:
-                    st.write("**按OM統計**")
-                    st.dataframe(stats['om_stats'])
-                
-                if not stats['transfer_type_stats'].empty:
-                    st.write("**轉出類型分佈**")
-                    st.dataframe(stats['transfer_type_stats'])
-                
-                if not stats['receive_stats'].empty:
-                    st.write("**接收類型結果**")
-                    st.dataframe(stats['receive_stats'])
-                
-                # Visualization
-                st.subheader("數據視覺化")
-                fig = create_visualization(stats, transfer_suggestions_df, mode)
-                if fig:
-                    st.pyplot(fig)
+
+                if not transfer_suggestions_df.empty:
+                    if not stats['article_stats'].empty:
+                        st.write("**按產品統計**")
+                        st.dataframe(stats['article_stats'])
+
+                    if not stats['om_stats'].empty:
+                        st.write("**按OM統計**")
+                        st.dataframe(stats['om_stats'])
+
+                    if not stats['transfer_type_stats'].empty:
+                        st.write("**轉出類型分佈**")
+                        st.dataframe(stats['transfer_type_stats'])
+
+                    if not stats['receive_stats'].empty:
+                        st.write("**接收類型結果**")
+                        st.dataframe(stats['receive_stats'])
+
+                    # Visualization
+                    st.subheader("數據視覺化")
+                    fig = create_visualization(stats, transfer_suggestions_df, mode)
+                    if fig:
+                        st.pyplot(fig)
+                    else:
+                        st.info("沒有足夠的數據生成圖表")
                 else:
-                    st.info("沒有足夠的數據生成圖表")
+                    # Show message when no data available
+                    st.info("📊 沒有轉貨建議資料，無法生成統計分析和圖表")
                 
                 # Export section
                 st.header("6. 匯出功能")
-                
+
                 if not transfer_suggestions_df.empty:
                     # Generate Excel file
                     excel_data = export_to_excel(transfer_suggestions_df, stats)
-                    
+
                     # Create download button
                     current_date = datetime.now().strftime("%Y%m%d")
                     filename = f"強制轉貨建議_{current_date}.xlsx"
-                    
+
                     st.download_button(
                         label="📥 下載Excel報告",
                         data=excel_data,
@@ -617,7 +706,7 @@ def main():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                 else:
-                    st.info("沒有可匯出的轉貨建議")
+                    st.info("📋 沒有轉貨建議資料，無法產生Excel報告")
         
         except Exception as e:
             st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
