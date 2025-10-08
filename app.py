@@ -226,12 +226,18 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
         if (article, om) in in_grouped.groups:
             in_group = in_grouped.get_group((article, om))
             
+            # Calculate total demand for this article
+            total_demand = in_group['Required Qty'].sum()
+            
             # Sort transfer-out by priority (ND first, then RF by lowest sales)
             out_group_sorted = out_group.sort_values(['Transfer Type', 'Effective Sales'],
                                                    ascending=[True, True])
             
             # Sort transfer-in by priority (highest sales first)
             in_group_sorted = in_group.sort_values('Effective Sales', ascending=False)
+            
+            # Track total transferred for this article
+            total_transferred = 0
             
             # Match transfers
             for _, out_store in out_group_sorted.iterrows():
@@ -247,6 +253,10 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                     
                     # Calculate transfer quantity (don't exceed demand)
                     transfer_qty = min(remaining_qty, in_store['Required Qty'])
+                    
+                    # Additional constraint: don't exceed total demand
+                    if total_transferred + transfer_qty > total_demand:
+                        transfer_qty = max(0, total_demand - total_transferred)
                     
                     if transfer_qty > 0:
                         # Get product description from original data
