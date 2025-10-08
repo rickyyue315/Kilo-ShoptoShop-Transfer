@@ -245,7 +245,7 @@ def match_transfers(transfer_out_df, transfer_in_df, original_df):
                     if out_store['Site'] == in_store['Site']:
                         continue
                     
-                    # Calculate transfer quantity
+                    # Calculate transfer quantity (don't exceed demand)
                     transfer_qty = min(remaining_qty, in_store['Required Qty'])
                     
                     if transfer_qty > 0:
@@ -355,7 +355,7 @@ def create_visualization(stats, transfer_suggestions_df, mode):
     receive_data = transfer_suggestions_df.groupby('Receive Site')['Transfer Qty'].sum()
     receive_by_om = transfer_suggestions_df.drop_duplicates('Receive Site').set_index('Receive Site')['OM']
     receive_by_om = receive_by_om[receive_data.index]
-    receive_by_type = pd.DataFrame({'實際接收數量': receive_data.values}, index=receive_by_om.values)
+    receive_by_type = pd.DataFrame({'Actual Receive Qty': receive_data.values}, index=receive_by_om.values)
     receive_by_type = receive_by_type.groupby(level=0).sum()
     
     # Add target data
