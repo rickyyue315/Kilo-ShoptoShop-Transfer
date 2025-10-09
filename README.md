@@ -1,149 +1,57 @@
-# 📦 調貨建議生成系統
+# Mandatory Shop-to-Shop Transfer System
 
-一個基於 Streamlit 的零售庫存調貨建議生成系統，支援多種轉貨策略和智慧分析。
+A Streamlit-based application for generating transfer recommendations between shops based on inventory data and business rules.
 
-## 🚀 功能特色
+## Features
 
-- **智慧轉貨策略**：支援保守轉貨、加強轉貨、特強轉貨三種策略
-- **資料預處理**：自動資料驗證、清理和格式標準化
-- **視覺化分析**：互動式圖表展示轉貨分析結果
-- **統計報表**：詳細的 KPI 指標和統計分析
-- **Excel 匯出**：支援多工作表格式匯出
-- **使用者友善**：直觀的介面設計和錯誤處理
+- **Data Upload**: Upload Excel files containing inventory and sales data
+- **Data Validation**: Automatic validation of required columns and data types
+- **Transfer Modes**:
+  - Mode A: Conservative Transfer
+  - Mode B: Enhanced Transfer
+  - Mode C: Super Enhanced Transfer
+- **Analytics**: Comprehensive statistics and visualizations
+- **Export**: Excel export of transfer recommendations
 
-## 🛠️ 技術棧
+## Installation
 
-- **前端框架**：Streamlit
-- **資料處理**：pandas, numpy
-- **Excel 處理**：openpyxl
-- **視覺化**：matplotlib, seaborn
+1. Clone the repository
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the application:
+   ```bash
+   streamlit run app.py
+   ```
 
-## 📋 系統需求
+## Usage
 
-### 輸入資料格式
+1. Upload your Excel file containing the required columns
+2. Select the transfer mode (A, B, or C)
+3. Click "Generate Recommendations" to process the data
+4. View statistics, charts, and transfer recommendations
+5. Export results to Excel
 
-Excel 檔案必須包含以下欄位：
+## Required Excel Columns
 
-| 欄位名稱 | 中文說明 | 資料類型 | 必填 |
-|---------|---------|---------|------|
-| Article | 產品編號 | 字串 | ✅ |
-| Article Description | 產品描述 | 字串 | ✅ |
-| RP Type | 補貨類型 | 字串 (ND/RF) | ✅ |
-| Site | 店鋪編號 | 字串 | ✅ |
-| OM | 營運管理單位 | 字串 | ✅ |
-| MOQ | 最低派貨數量 | 整數 | ✅ |
-| SaSa Net Stock | 現有庫存數量 | 整數 | ✅ |
-| Target | 目標要求數量 | 整數 | ✅ |
-| Pending Received | 在途訂單數量 | 整數 | ✅ |
-| Safety Stock | 安全庫存數量 | 整數 | ✅ |
-| Last Month Sold Qty | 上月銷量 | 整數 | ✅ |
-| MTD Sold Qty | 本月至今銷量 | 整數 | ✅ |
+- Article (str) - Product code
+- Article Description (str) - Product description
+- RP Type (str) - Replenishment type (ND or RF)
+- Site (str) - Shop code
+- OM (str) - Operations manager
+- MOQ (int) - Minimum order quantity
+- SaSa Net Stock (int) - Current stock
+- Target (int) - Target quantity
+- Pending Received (int) - Pending incoming stock
+- Safety Stock (int) - Safety stock level
+- Last Month Sold Qty (int) - Last month's sales
+- MTD Sold Qty (int) - Month-to-date sales
 
-## 🎯 轉貨策略說明
+## Developer
 
-### A: 保守轉貨
-- **ND 類型**：全部轉出
-- **RF 類型**：轉出超過安全庫存的部分，上限為庫存的 50%
-- **適用場景**：風險控制優先，穩健經營
+Ricky
 
-### B: 加強轉貨
-- **ND 類型**：全部轉出
-- **RF 類型**：轉出超過 MOQ+1 的部分，上限為庫存的 80%
-- **適用場景**：積極庫存管理，加快資金周轉
+## Version
 
-### C: 特強轉貨
-- **ND 類型**：全部轉出
-- **RF 類型**：盡可能轉出，上限為庫存的 90%，最少保留 2 件
-- **適用場景**：極端庫存清理，最大化資源利用
-
-## 📊 分析功能
-
-### KPI 指標
-- 總調貨建議數量
-- 總調貨件數
-- 涉及產品數量
-- 涉及 OM 數量
-
-### 統計維度
-- **按產品統計**：需求件數、調貨件數、達成率
-- **按 OM 統計**：轉貨件數、需求件數、產品數量
-- **轉出類型分佈**：各類型轉出統計
-- **接收達成率**：需求 vs 實際接收對比
-
-## 🖥️ 使用說明
-
-### 1. 環境安裝
-```bash
-pip install -r requirements.txt
-```
-
-### 2. 系統啟動
-```bash
-streamlit run app.py
-```
-
-### 3. 操作步驟
-1. **資料上傳**：選擇包含庫存資料的 Excel 檔案
-2. **資料預覽**：確認資料格式和基本統計資訊
-3. **策略選擇**：選擇轉貨策略（A/B/C）
-4. **結果檢視**：查看調貨建議、圖表和統計報表
-5. **匯出結果**：下載 Excel 格式的分析報告
-
-## 📁 專案結構
-
-```
-Kilo ShoptoShop Transfer/
-├── app.py                 # 主應用程式
-├── requirements.txt       # 依賴套件
-├── README.md             # 專案說明
-├── VERSION.md            # 版本記錄
-└── ELE_08Sep2025_Test.XLSX # 測試資料
-```
-
-## 🔧 設定選項
-
-### 介面配置
-- **寬屏佈局**：優化大螢幕顯示效果
-- **中文字體**：支援中文介面顯示
-- **響應式設計**：適配不同螢幕尺寸
-
-### 錯誤處理
-- 檔案格式驗證
-- 欄位完整性檢查
-- 資料類型轉換異常處理
-- 使用者友好的錯誤提示
-
-## 📈 輸出格式
-
-### Excel 匯出內容
-1. **調貨建議工作表**
-   - 完整的調貨建議明細
-   - 轉出和接收店鋪資訊
-   - 庫存和目標數量對比
-
-2. **統計摘要工作表**
-   - KPI 概覽表格
-   - 產品統計分析
-   - OM 統計分析
-   - 轉出類型分佈
-
-## 🆘 常見問題
-
-### Q: 支援哪些 Excel 格式？
-A: 支援 .xlsx 和 .xls 格式，建議使用 .xlsx 以獲得最佳相容性。
-
-### Q: 資料量有限制嗎？
-A: 理論上支援任意大小資料，但建議單檔不超過 10MB 以確保效能。
-
-### Q: 如何處理資料格式錯誤？
-A: 系統會自動進行資料清理和格式轉換，並在 Notes 欄位記錄處理過程。
-
-## 👨‍💻 開發者資訊
-
-**開發者**: Ricky
-**版本**: v1.0
-**最後更新**: 2025年10月
-
-## 📝 更新記錄
-
-詳見 [VERSION.md](VERSION.md) 檔案。
+v1.0
