@@ -565,7 +565,7 @@ def calculate_statistics(transfers, df):
         'receive_stats': receive_stats
     }
 
-def create_visualization(transfers, mode):
+def create_visualization(transfers, mode, df):
     """Create matplotlib visualization based on mode"""
     if not transfers:
         return None
@@ -589,9 +589,9 @@ def create_visualization(transfers, mode):
 
         om_data[om]['Received'] += transfer['Receive Qty']
 
-    # Add demand data
+    # Add demand data - total demand for the OM
     for om in om_data:
-        om_data[om]['Demand'] = sum(t['Receive Site Target Qty'] for t in transfers if t['OM'] == om)
+        om_data[om]['Demand'] = df[(df['OM'] == om) & (df['Target'] > 0)]['Target'].sum()
 
     # Create plot
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -800,7 +800,7 @@ if uploaded_file is not None:
 
                         # Visualization
                         st.subheader("Transfer Analysis Chart")
-                        fig = create_visualization(transfers, st.session_state.mode)
+                        fig = create_visualization(transfers, st.session_state.mode, processed_data)
                         if fig:
                             st.pyplot(fig)
 
