@@ -13,6 +13,52 @@ A Streamlit-based application for generating transfer recommendations between sh
 - **Analytics**: Comprehensive statistics and visualizations
 - **Export**: Excel export of transfer recommendations
 
+## Transfer Mode Logic / 轉移模式邏輯
+
+### Mode A: Conservative Transfer / 保守轉移模式
+
+**ND 類型 (Priority 1):**
+- 完整轉移所有庫存
+- 條件：`SaSa Net Stock > 0`
+
+**RF 類型 (Priority 2):**
+- 條件：`(可用庫存) > Safety Stock` 且 `銷售量 < 該商品最高銷售量`
+- 轉移量計算：`min(可用庫存 - Safety Stock, 可用庫存 * 0.5)`
+- 最大轉移量不超過可用庫存的 **50%**
+- 按銷售量升序排列（銷售較少的店舖優先轉出）
+
+### Mode B: Enhanced Transfer / 增強轉移模式
+
+**ND 類型 (Priority 1):**
+- 完整轉移所有庫存
+- 條件：`SaSa Net Stock > 0`
+
+**RF 類型 (Priority 2):**
+- 條件：`(可用庫存) > MOQ` 且 `銷售量 < 該商品最高銷售量`
+- 轉移量計算：`min(可用庫存 - MOQ, 可用庫存 * 0.9)`
+- 最大轉移量不超過可用庫存的 **90%**
+- 按銷售量升序排列（銷售較少的店舖優先轉出）
+
+### Mode C: Super Enhanced Transfer / 超級增強轉移模式
+
+**ND 類型 (Priority 1):**
+- 完整轉移所有庫存
+- 條件：`SaSa Net Stock > 0`
+
+**RF 類型 (Priority 2):**
+- **可忽視最小庫存要求**
+- 條件：`SaSa Net Stock > 0`
+- 轉移量計算：`max(0, SaSa Net Stock)`
+- 最大轉移量可達 **100%**，以滿足目標需求
+- 按銷售量升序排列（過去銷售最多的店舖排最後出貨）
+
+### 通用規則
+
+- **可用庫存** = `SaSa Net Stock + Pending Received`
+- **有效銷售量** = `Last Month Sold Qty` (若 > 0)，否則使用 `MTD Sold Qty`
+- 轉移量不能超過實際庫存 (`SaSa Net Stock`)
+- 轉移匹配時，同一 Article 和 OM 的轉出店舖與接收店舖必須不同
+
 ## Installation
 
 1. Clone the repository

@@ -276,21 +276,22 @@ def generate_transfer_recommendations_enhanced(df):
         })
 
     # Identify transfer out candidates (Priority 2: RF type enhanced transfer)
+    # RF類型的轉移基於MOQ和銷售表現，轉移量計算為：min(可用庫存 - MOQ, 可用庫存 * 0.9)
     rf_mask = (df['RP Type'] == 'RF') & \
-              ((df['SaSa Net Stock'] + df['Pending Received']) > (df['MOQ'] + 1)) & \
-              (df['Effective Sales'] < max_sales_dict.get(row['Article'], 0))
+              ((df['SaSa Net Stock'] + df['Pending Received']) > df['MOQ']) & \
+              (df['Effective Sales'] < df['Article'].map(max_sales_dict))
 
-    # Sort by sales ascending
+    # Sort by sales ascending (lower sales sites transfer first)
     rf_candidates = df[rf_mask].copy()
     rf_candidates['Effective Sales'] = rf_candidates.apply(calculate_effective_sales, axis=1)
     rf_candidates = rf_candidates.sort_values('Effective Sales')
 
     for _, row in rf_candidates.iterrows():
         available_stock = row['SaSa Net Stock'] + row['Pending Received']
-        base_transfer = available_stock - (row['MOQ'] + 1)
-        max_transfer = available_stock * 0.8
+        base_transfer = available_stock - row['MOQ']
+        max_transfer = available_stock * 0.9
         transfer_qty = min(base_transfer, max_transfer)
-        transfer_qty = min(transfer_qty, row['SaSa Net Stock'])
+        transfer_qty = min(transfer_qty, row['SaSa Net Stock'])  # Cannot exceed actual stock
 
         if transfer_qty > 0:
             transfer_out_candidates.append({
@@ -398,21 +399,18 @@ def generate_transfer_recommendations_super(df):
         })
 
     # Identify transfer out candidates (Priority 2: RF type super enhanced transfer)
-    rf_mask = (df['RP Type'] == 'RF') & \
-              ((df['SaSa Net Stock'] + df['Pending Received']) > 0) & \
-              (df['Effective Sales'] < max_sales_dict.get(row['Article'], 0))
+    # RF類型的轉移可忽視最小庫存要求，參考銷售表現，過去銷售最多的店舖排最後出貨
+    # 最大轉移量可用庫存的100%，以滿足目標需求
+    rf_mask = (df['RP Type'] == 'RF') & (df['SaSa Net Stock'] > 0)
 
-    # Sort by sales ascending
+    # Sort by sales ascending (lower sales sites transfer first, highest sales last)
     rf_candidates = df[rf_mask].copy()
     rf_candidates['Effective Sales'] = rf_candidates.apply(calculate_effective_sales, axis=1)
-    rf_candidates = rf_candidates.sort_values('Effective Sales')
+    rf_candidates = rf_candidates.sort_values('Effective Sales', ascending=True)
 
     for _, row in rf_candidates.iterrows():
-        available_stock = row['SaSa Net Stock'] + row['Pending Received']
-        base_transfer = max(0, available_stock - 2)  # Leave 2 pieces
-        max_transfer = available_stock * 0.9
-        transfer_qty = min(base_transfer, max_transfer)
-        transfer_qty = min(transfer_qty, row['SaSa Net Stock'])
+        # 可轉移全部實際庫存，不需保留任何庫存
+        transfer_qty = max(0, row['SaSa Net Stock'])
 
         if transfer_qty > 0:
             transfer_out_candidates.append({
@@ -421,7 +419,8 @@ def generate_transfer_recommendations_super(df):
                 'OM': row['OM'],
                 'Transfer Qty': int(transfer_qty),
                 'Transfer Type': 'RF Super Enhanced Transfer',
-                'Priority': 2
+                'Priority': 2,
+                'Effective Sales': row['Effective Sales']  # 記錄銷售量用於排序
             })
 
     # Identify receive candidates
