@@ -233,8 +233,10 @@ def generate_transfer_recommendations_conservative(df):
                         'Transfer Site After Transfer Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0] - transfer_qty,
                         'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
                         'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
+                        'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
                         'Receive Site': receive['Site'],
                         'Receive Site Target Qty': receive['Target Qty'],
+                        'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
                         'Transfer Type': transfer['Transfer Type'],
                         'Receive Qty': transfer_qty,
                         'Notes': ''
@@ -356,8 +358,10 @@ def generate_transfer_recommendations_enhanced(df):
                         'Transfer Site After Transfer Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0] - transfer_qty,
                         'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
                         'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
+                        'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
                         'Receive Site': receive['Site'],
                         'Receive Site Target Qty': receive['Target Qty'],
+                        'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
                         'Transfer Type': transfer['Transfer Type'],
                         'Receive Qty': transfer_qty,
                         'Notes': ''
@@ -476,8 +480,10 @@ def generate_transfer_recommendations_super(df):
                         'Transfer Site After Transfer Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0] - transfer_qty,
                         'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
                         'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
+                        'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
                         'Receive Site': receive['Site'],
                         'Receive Site Target Qty': receive['Target Qty'],
+                        'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
                         'Transfer Type': transfer['Transfer Type'],
                         'Receive Qty': transfer_qty,
                         'Notes': ''
@@ -642,8 +648,9 @@ def export_to_excel(transfers, stats):
             columns_order = [
                 'Article', 'Article Description', 'OM', 'Transfer Site', 'Transfer Qty',
                 'Transfer Site Original Stock', 'Transfer Site After Transfer Stock',
-                'Transfer Site Safety Stock', 'Transfer Site MOQ', 'Receive Site',
-                'Receive Site Target Qty', 'Notes'
+                'Transfer Site Safety Stock', 'Transfer Site MOQ', 'Transfer Site RP Type',
+                'Receive Site', 'Receive Site Target Qty', 'Receive Site RP Type',
+                'Transfer Type', 'Receive Qty', 'Notes'
             ]
             transfer_df = transfer_df[columns_order]
             transfer_df.to_excel(writer, sheet_name='Transfer Recommendations', index=False)
