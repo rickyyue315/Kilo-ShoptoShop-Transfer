@@ -154,7 +154,7 @@ def generate_transfer_recommendations_conservative(df):
     # Identify transfer out candidates (Priority 2: RF type excess transfer)
     rf_mask = (df['RP Type'] == 'RF') & \
               ((df['SaSa Net Stock'] + df['Pending Received']) > df['Safety Stock']) & \
-              (df['Effective Sales'] < max_sales_dict.get(row['Article'], 0))
+              (df['Effective Sales'] < df['Article'].map(max_sales_dict))
 
     # Sort by sales ascending for conservative approach
     rf_candidates = df[rf_mask].copy()
