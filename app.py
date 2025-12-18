@@ -665,53 +665,26 @@ def create_visualization(transfers, mode, df):
     plt.tight_layout()
     return fig
 
-def export_to_excel(transfers, stats, df):
+def export_to_excel(transfers, stats):
     """將結果匯出到Excel，包含兩個工作表"""
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         # 工作表1: 轉移建議
         if transfers:
-            # 準備轉移數據 - 根據參考格式調整
-            transfer_data = []
-            for transfer in transfers:
-                # 獲取接收店舖的原始庫存
-                receive_original_stock = df[(df['Site'] == transfer['Receive Site']) &
-                                           (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0] if len(df[(df['Site'] == transfer['Receive Site']) & (df['Article'] == transfer['Article'])]) > 0 else 0
-                
-                # 生成Remark和Notes內容
-                transfer_type = transfer['Transfer Type']
-                if 'ND' in transfer_type:
-                    remark = "ND轉出 → 緊急缺貨補貨" if transfer['Receive Qty'] > 0 else "ND轉出"
-                    notes = f"【轉出分類: {transfer_type}】 | 【接收分類: 緊急缺貨補貨】 | 【轉出優先級: ND轉出】 | 【接收優先級: 接收(最高優先級)】"
-                else:
-                    remark = f"{transfer_type} → 潛在缺貨補貨"
-                    notes = f"【轉出分類: {transfer_type}】 | 【接收分類: 潛在缺貨補貨】 | 【轉出優先級: RF轉出】 | 【接收優先級: 接收(一般優先級)】"
-                
-                row = {
-                    'Article': transfer['Article'],
-                    'Product Desc': transfer['Article Description'],
-                    'Transfer OM': transfer['OM'],
-                    'Transfer Site': transfer['Transfer Site'],
-                    'Receive OM': transfer['OM'],  # Mode A/B為相同OM，C模式可能不同
-                    'Receive Site': transfer['Receive Site'],
-                    'Transfer Qty': transfer['Transfer Qty'],
-                    'Transfer Original Stock': transfer['Transfer Site Original Stock'],
-                    'Transfer After Transfer Stock': transfer['Transfer Site After Transfer Stock'],
-                    'Transfer Safety Stock': transfer['Transfer Site Safety Stock'],
-                    'Transfer MOQ': transfer['Transfer Site MOQ'],
-                    'Remark': remark,
-                    'Notes': notes,
-                    'Transfer Site Last Month Sold Qty': transfer.get('Transfer Site Last Month Sold Qty', 0),
-                    'Transfer Site MTD Sold Qty': transfer.get('Transfer Site MTD Sold Qty', 0),
-                    'Receive Site Last Month Sold Qty': transfer.get('Receive Site Last Month Sold Qty', 0),
-                    'Receive Site MTD Sold Qty': transfer.get('Receive Site MTD Sold Qty', 0),
-                    'Receive Original Stock': receive_original_stock
-                }
-                transfer_data.append(row)
-            
-            transfer_df = pd.DataFrame(transfer_data)
-            transfer_df.to_excel(writer, sheet_name='調貨建議', index=False)
+            transfer_df = pd.DataFrame(transfers)
+            # 重新排序欄位
+            columns_order = [
+                'Article', 'Article Description', 'OM', 'Transfer Site', 'Transfer Qty',
+                'Transfer Site Original Stock', 'Transfer Site After Transfer Stock',
+                'Transfer Site Safety Stock', 'Transfer Site MOQ', 'Transfer Site RP Type',
+                'Transfer Site Last Month Sold Qty', 'Transfer Site MTD Sold Qty',
+                'Receive Site', 'Receive Site Target Qty', 'Receive Site RP Type',
+                'Receive Site Last Month Sold Qty', 'Receive Site MTD Sold Qty',
+                'Transfer Type', 'Receive Qty', 'Notes'
+            ]
+            transfer_df = transfer_df[columns_order]
+            transfer_df.to_excel(writer, sheet_name='轉移建議', index=False)
 
         # 工作表2: 統計摘要
         # 基本KPI
@@ -900,7 +873,7 @@ if uploaded_file is not None:
 
                         # 匯出
                         st.header("5. 匯出結果")
-                        excel_data = export_to_excel(transfers, stats, processed_data)
+                        excel_data = export_to_excel(transfers, stats)
                         st.download_button(
                             label="📥 下載Excel檔案",
                             data=excel_data.getvalue(),
