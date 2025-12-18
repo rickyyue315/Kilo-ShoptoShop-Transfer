@@ -234,9 +234,13 @@ def generate_transfer_recommendations_conservative(df):
                         'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
                         'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
                         'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
+                        'Transfer Site Last Month Sold Qty': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Last Month Sold Qty'].iloc[0],
+                        'Transfer Site MTD Sold Qty': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MTD Sold Qty'].iloc[0],
                         'Receive Site': receive['Site'],
                         'Receive Site Target Qty': receive['Target Qty'],
                         'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
+                        'Receive Site Last Month Sold Qty': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['Last Month Sold Qty'].iloc[0],
+                        'Receive Site MTD Sold Qty': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['MTD Sold Qty'].iloc[0],
                         'Transfer Type': transfer['Transfer Type'],
                         'Receive Qty': transfer_qty,
                         'Notes': ''
@@ -359,9 +363,13 @@ def generate_transfer_recommendations_enhanced(df):
                         'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
                         'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
                         'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
+                        'Transfer Site Last Month Sold Qty': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Last Month Sold Qty'].iloc[0],
+                        'Transfer Site MTD Sold Qty': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MTD Sold Qty'].iloc[0],
                         'Receive Site': receive['Site'],
                         'Receive Site Target Qty': receive['Target Qty'],
                         'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
+                        'Receive Site Last Month Sold Qty': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['Last Month Sold Qty'].iloc[0],
+                        'Receive Site MTD Sold Qty': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['MTD Sold Qty'].iloc[0],
                         'Transfer Type': transfer['Transfer Type'],
                         'Receive Qty': transfer_qty,
                         'Notes': ''
@@ -445,6 +453,11 @@ def generate_transfer_recommendations_super(df):
     # Matching algorithm for Mode C - 允許不同OM組別調撥，只限制HD不能去HA,HB,HC組別
     transfers = []
     used_stock = {}
+    
+    # 計算每個商品的總需求（跨所有OM組別）
+    article_total_demand = {}
+    for article in df['Article'].unique():
+        article_total_demand[article] = df[(df['Article'] == article) & (df['Target'] > 0)]['Target'].sum()
 
     for transfer in transfer_out_candidates:
         transfer_key = (transfer['Site'], transfer['Article'])
@@ -472,9 +485,8 @@ def generate_transfer_recommendations_super(df):
             if transfer['Article'] != receive['Article']:
                 continue
 
-            # 檢查總需求限制
-            total_demand = sum(r['Target Qty'] for r in receive_candidates
-                             if r['Article'] == transfer['Article'])
+            # 檢查總需求限制（所有接收店的總需求）
+            total_demand = article_total_demand.get(transfer['Article'], 0)
             current_allocated = sum(t['Receive Qty'] for t in transfers
                                   if t['Article'] == transfer['Article'])
 
@@ -494,9 +506,13 @@ def generate_transfer_recommendations_super(df):
                     'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
                     'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
                     'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
+                    'Transfer Site Last Month Sold Qty': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Last Month Sold Qty'].iloc[0],
+                    'Transfer Site MTD Sold Qty': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MTD Sold Qty'].iloc[0],
                     'Receive Site': receive['Site'],
                     'Receive Site Target Qty': receive['Target Qty'],
                     'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
+                    'Receive Site Last Month Sold Qty': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['Last Month Sold Qty'].iloc[0],
+                    'Receive Site MTD Sold Qty': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['MTD Sold Qty'].iloc[0],
                     'Transfer Type': transfer['Transfer Type'],
                     'Receive Qty': transfer_qty,
                     'Notes': ''
@@ -594,54 +610,54 @@ def create_visualization(transfers, mode, df):
         om = transfer['OM']
         if om not in om_data:
             om_data[om] = {
-                'ND轉移量': 0,
-                'RF轉移量': 0,
-                '需求量': 0,
-                '實際接收量': 0
+                'ND Transfer': 0,
+                'RF Transfer': 0,
+                'Demand': 0,
+                'Actual Received': 0
             }
 
         if 'ND' in transfer['Transfer Type']:
-            om_data[om]['ND轉移量'] += transfer['Transfer Qty']
+            om_data[om]['ND Transfer'] += transfer['Transfer Qty']
         else:
-            om_data[om]['RF轉移量'] += transfer['Transfer Qty']
+            om_data[om]['RF Transfer'] += transfer['Transfer Qty']
 
-        om_data[om]['實際接收量'] += transfer['Receive Qty']
+        om_data[om]['Actual Received'] += transfer['Receive Qty']
 
     # 新增需求資料 - 該OM的總需求
     for om in om_data:
-        om_data[om]['需求量'] = df[(df['OM'] == om) & (df['Target'] > 0)]['Target'].sum()
+        om_data[om]['Demand'] = df[(df['OM'] == om) & (df['Target'] > 0)]['Target'].sum()
 
     # 建立圖表
     fig, ax = plt.subplots(figsize=(12, 6))
 
     oms = list(om_data.keys())
-    nd_transfer = [om_data[om]['ND轉移量'] for om in oms]
-    rf_transfer = [om_data[om]['RF轉移量'] for om in oms]
-    demand = [om_data[om]['需求量'] for om in oms]
-    received = [om_data[om]['實際接收量'] for om in oms]
+    nd_transfer = [om_data[om]['ND Transfer'] for om in oms]
+    rf_transfer = [om_data[om]['RF Transfer'] for om in oms]
+    demand = [om_data[om]['Demand'] for om in oms]
+    received = [om_data[om]['Actual Received'] for om in oms]
 
     x = np.arange(len(oms))
     width = 0.2
 
     if mode == 'A':
-        ax.bar(x - width*1.5, nd_transfer, width, label='ND轉移量', color='blue')
-        ax.bar(x - width/2, rf_transfer, width, label='RF剩餘轉移量', color='green')
-        ax.bar(x + width/2, demand, width, label='需求量', color='red')
-        ax.bar(x + width*1.5, received, width, label='實際接收量', color='orange')
+        ax.bar(x - width*1.5, nd_transfer, width, label='ND Transfer', color='blue')
+        ax.bar(x - width/2, rf_transfer, width, label='RF Excess Transfer', color='green')
+        ax.bar(x + width/2, demand, width, label='Demand', color='red')
+        ax.bar(x + width*1.5, received, width, label='Actual Received', color='orange')
     elif mode == 'B':
-        ax.bar(x - width*2, nd_transfer, width, label='ND轉移量', color='blue')
-        ax.bar(x - width, rf_transfer, width, label='RF增強轉移量', color='green')
-        ax.bar(x, demand, width, label='需求量', color='red')
-        ax.bar(x + width, received, width, label='實際接收量', color='orange')
+        ax.bar(x - width*2, nd_transfer, width, label='ND Transfer', color='blue')
+        ax.bar(x - width, rf_transfer, width, label='RF Enhanced Transfer', color='green')
+        ax.bar(x, demand, width, label='Demand', color='red')
+        ax.bar(x + width, received, width, label='Actual Received', color='orange')
     else:  # Mode C
-        ax.bar(x - width*2, nd_transfer, width, label='ND轉移量', color='blue')
-        ax.bar(x - width, rf_transfer, width, label='RF超級增強轉移量', color='green')
-        ax.bar(x, demand, width, label='需求量', color='red')
-        ax.bar(x + width, received, width, label='實際接收量', color='orange')
+        ax.bar(x - width*2, nd_transfer, width, label='ND Transfer', color='blue')
+        ax.bar(x - width, rf_transfer, width, label='RF Super Enhanced Transfer', color='green')
+        ax.bar(x, demand, width, label='Demand', color='red')
+        ax.bar(x + width, received, width, label='Actual Received', color='orange')
 
-    ax.set_xlabel('OM組別')
-    ax.set_ylabel('轉移數量')
-    ax.set_title('轉移接收分析圖')
+    ax.set_xlabel('OM Group')
+    ax.set_ylabel('Transfer Quantity')
+    ax.set_title('Transfer Analysis Chart')
     ax.set_xticks(x)
     ax.set_xticklabels(oms)
     ax.legend()
@@ -662,7 +678,9 @@ def export_to_excel(transfers, stats):
                 'Article', 'Article Description', 'OM', 'Transfer Site', 'Transfer Qty',
                 'Transfer Site Original Stock', 'Transfer Site After Transfer Stock',
                 'Transfer Site Safety Stock', 'Transfer Site MOQ', 'Transfer Site RP Type',
+                'Transfer Site Last Month Sold Qty', 'Transfer Site MTD Sold Qty',
                 'Receive Site', 'Receive Site Target Qty', 'Receive Site RP Type',
+                'Receive Site Last Month Sold Qty', 'Receive Site MTD Sold Qty',
                 'Transfer Type', 'Receive Qty', 'Notes'
             ]
             transfer_df = transfer_df[columns_order]
