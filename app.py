@@ -10,7 +10,7 @@ from openpyxl import Workbook
 
 # Set page configuration
 st.set_page_config(
-    page_title="Mandatory Shop-to-Shop Transfer System",
+    page_title="店舖間強制轉移系統",
     page_icon="📦",
     layout="wide"
 )
@@ -23,20 +23,20 @@ REQUIRED_COLUMNS = [
 ]
 
 # Sidebar
-st.sidebar.header("System Information")
+st.sidebar.header("系統資訊")
 st.sidebar.info("""
-**Version: v1.0**
-**Developer: Ricky**
+**版本: v2.0**
+**開發者: Ricky**
 
-**Core Features:**
-- ✅ ND/RF Type Smart Identification
-- ✅ Priority Order Transfer
-- ✅ Statistical Analysis and Charts
-- ✅ Excel Format Export
+**核心功能:**
+- ✅ ND/RF 類型智能識別
+- ✅ 優先級訂單轉移
+- ✅ 統計分析與圖表
+- ✅ Excel 格式匯出
 """)
 
 # Main title
-st.title("📦 Mandatory Shop-to-Shop Transfer System")
+st.title("📦 店舖間強制轉移系統")
 
 # Initialize session state
 if 'data' not in st.session_state:
@@ -49,64 +49,64 @@ if 'mode' not in st.session_state:
     st.session_state.mode = 'A'
 
 def load_data(uploaded_file):
-    """Load and validate Excel data"""
+    """載入並驗證Excel資料"""
     try:
-        # Read Excel file
+        # 讀取Excel檔案
         df = pd.read_excel(uploaded_file, engine='openpyxl')
 
-        # Check for required columns
+        # 檢查必要欄位
         missing_cols = [col for col in REQUIRED_COLUMNS if col not in df.columns]
         if missing_cols:
-            st.error(f"Missing required columns: {', '.join(missing_cols)}")
+            st.error(f"缺少必要欄位: {', '.join(missing_cols)}")
             return None
 
-        # Validate data types and convert
+        # 驗證資料類型並轉換
         df = df[REQUIRED_COLUMNS].copy()
 
-        # Convert data types
+        # 轉換資料類型
         df['Article'] = df['Article'].astype(str)
         numeric_cols = ['MOQ', 'SaSa Net Stock', 'Target', 'Pending Received',
                        'Safety Stock', 'Last Month Sold Qty', 'MTD Sold Qty']
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
 
-        # Validate RP Type
+        # 驗證RP Type
         valid_rp_types = ['ND', 'RF']
         invalid_rp = df[~df['RP Type'].isin(valid_rp_types)]
         if not invalid_rp.empty:
-            st.warning(f"Found invalid RP Type values. Valid values are ND or RF. Invalid rows: {len(invalid_rp)}")
+            st.warning(f"發現無效的RP Type值。有效值為ND或RF。無效行數: {len(invalid_rp)}")
 
         return df
 
     except Exception as e:
-        st.error(f"Error loading file: {str(e)}")
+        st.error(f"載入檔案時發生錯誤: {str(e)}")
         return None
 
 def preprocess_data(df):
-    """Preprocess the data according to business rules"""
+    """根據業務規則預處理資料"""
     df = df.copy()
 
-    # Add Notes column for logging
+    # 新增註記欄位
     df['Notes'] = ''
 
-    # Fix negative values
+    # 修正負值
     numeric_cols = ['SaSa Net Stock', 'Pending Received', 'Safety Stock',
                    'Last Month Sold Qty', 'MTD Sold Qty']
     for col in numeric_cols:
         negative_mask = df[col] < 0
         if negative_mask.any():
             df.loc[negative_mask, col] = 0
-            df.loc[negative_mask, 'Notes'] += f'{col} corrected from negative to 0; '
+            df.loc[negative_mask, 'Notes'] += f'{col} 從負值修正為0; '
 
-    # Cap extreme sales values
+    # 限制極端銷售值
     sales_cols = ['Last Month Sold Qty', 'MTD Sold Qty']
     for col in sales_cols:
         extreme_mask = df[col] > 100000
         if extreme_mask.any():
             df.loc[extreme_mask, col] = 100000
-            df.loc[extreme_mask, 'Notes'] += f'{col} capped at 100000; '
+            df.loc[extreme_mask, 'Notes'] += f'{col} 限制為100000; '
 
-    # Fill string columns
+    # 填充字串欄位
     string_cols = ['Article Description', 'RP Type', 'Site', 'OM']
     for col in string_cols:
         df[col] = df[col].fillna('')
@@ -442,7 +442,7 @@ def generate_transfer_recommendations_super(df):
     transfer_out_candidates.sort(key=lambda x: x['Priority'])
     receive_candidates.sort(key=lambda x: x['Priority'])
 
-    # Matching algorithm (same as before)
+    # Matching algorithm for Mode C - 允許不同OM組別調撥，只限制HD不能去HA,HB,HC組別
     transfers = []
     used_stock = {}
 
@@ -456,45 +456,58 @@ def generate_transfer_recommendations_super(df):
             continue
 
         for receive in receive_candidates:
-            if (transfer['Article'] == receive['Article'] and
-                transfer['OM'] == receive['OM'] and
-                transfer['Site'] != receive['Site']):
+            # Mode C: 只限制HD不能去HA,HB,HC組別
+            transfer_om = transfer['OM']
+            receive_om = receive['OM']
+            
+            # 檢查限制條件：如果轉出店是HD，接收店不能是HA,HB,HC
+            if transfer_om == 'HD' and receive_om in ['HA', 'HB', 'HC']:
+                continue
+                
+            # 檢查是否同一店舖
+            if transfer['Site'] == receive['Site']:
+                continue
 
-                total_demand = sum(r['Target Qty'] for r in receive_candidates
-                                 if r['Article'] == transfer['Article'] and r['OM'] == transfer['OM'])
-                current_allocated = sum(t['Receive Qty'] for t in transfers
-                                      if t['Article'] == transfer['Article'] and t['OM'] == transfer['OM'])
+            # 檢查商品是否相同
+            if transfer['Article'] != receive['Article']:
+                continue
 
-                if current_allocated >= total_demand:
-                    continue
+            # 檢查總需求限制
+            total_demand = sum(r['Target Qty'] for r in receive_candidates
+                             if r['Article'] == transfer['Article'])
+            current_allocated = sum(t['Receive Qty'] for t in transfers
+                                  if t['Article'] == transfer['Article'])
 
-                transfer_qty = min(available_qty, receive['Target Qty'])
-                if transfer_qty > 0:
-                    transfers.append({
-                        'Article': transfer['Article'],
-                        'Article Description': df[df['Article'] == transfer['Article']]['Article Description'].iloc[0],
-                        'OM': transfer['OM'],
-                        'Transfer Site': transfer['Site'],
-                        'Transfer Qty': transfer_qty,
-                        'Transfer Site Original Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0],
-                        'Transfer Site After Transfer Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0] - transfer_qty,
-                        'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
-                        'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
-                        'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
-                        'Receive Site': receive['Site'],
-                        'Receive Site Target Qty': receive['Target Qty'],
-                        'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
-                        'Transfer Type': transfer['Transfer Type'],
-                        'Receive Qty': transfer_qty,
-                        'Notes': ''
-                    })
+            if current_allocated >= total_demand:
+                continue
 
-                    used_stock[transfer_key] += transfer_qty
-                    receive['Target Qty'] -= transfer_qty
-                    available_qty -= transfer_qty
+            transfer_qty = min(available_qty, receive['Target Qty'])
+            if transfer_qty > 0:
+                transfers.append({
+                    'Article': transfer['Article'],
+                    'Article Description': df[df['Article'] == transfer['Article']]['Article Description'].iloc[0],
+                    'OM': transfer['OM'],
+                    'Transfer Site': transfer['Site'],
+                    'Transfer Qty': transfer_qty,
+                    'Transfer Site Original Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0],
+                    'Transfer Site After Transfer Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['SaSa Net Stock'].iloc[0] - transfer_qty,
+                    'Transfer Site Safety Stock': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['Safety Stock'].iloc[0],
+                    'Transfer Site MOQ': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['MOQ'].iloc[0],
+                    'Transfer Site RP Type': df[(df['Site'] == transfer['Site']) & (df['Article'] == transfer['Article'])]['RP Type'].iloc[0],
+                    'Receive Site': receive['Site'],
+                    'Receive Site Target Qty': receive['Target Qty'],
+                    'Receive Site RP Type': df[(df['Site'] == receive['Site']) & (df['Article'] == receive['Article'])]['RP Type'].iloc[0],
+                    'Transfer Type': transfer['Transfer Type'],
+                    'Receive Qty': transfer_qty,
+                    'Notes': ''
+                })
 
-                    if available_qty <= 0:
-                        break
+                used_stock[transfer_key] += transfer_qty
+                receive['Target Qty'] -= transfer_qty
+                available_qty -= transfer_qty
+
+                if available_qty <= 0:
+                    break
 
     return transfers
 
@@ -571,64 +584,64 @@ def calculate_statistics(transfers, df):
     }
 
 def create_visualization(transfers, mode, df):
-    """Create matplotlib visualization based on mode"""
+    """根據模式建立matplotlib視覺化圖表"""
     if not transfers:
         return None
 
-    # Prepare data
+    # 準備資料
     om_data = {}
     for transfer in transfers:
         om = transfer['OM']
         if om not in om_data:
             om_data[om] = {
-                'ND Transfer': 0,
-                'RF Transfer': 0,
-                'Demand': 0,
-                'Received': 0
+                'ND轉移量': 0,
+                'RF轉移量': 0,
+                '需求量': 0,
+                '實際接收量': 0
             }
 
         if 'ND' in transfer['Transfer Type']:
-            om_data[om]['ND Transfer'] += transfer['Transfer Qty']
+            om_data[om]['ND轉移量'] += transfer['Transfer Qty']
         else:
-            om_data[om]['RF Transfer'] += transfer['Transfer Qty']
+            om_data[om]['RF轉移量'] += transfer['Transfer Qty']
 
-        om_data[om]['Received'] += transfer['Receive Qty']
+        om_data[om]['實際接收量'] += transfer['Receive Qty']
 
-    # Add demand data - total demand for the OM
+    # 新增需求資料 - 該OM的總需求
     for om in om_data:
-        om_data[om]['Demand'] = df[(df['OM'] == om) & (df['Target'] > 0)]['Target'].sum()
+        om_data[om]['需求量'] = df[(df['OM'] == om) & (df['Target'] > 0)]['Target'].sum()
 
-    # Create plot
+    # 建立圖表
     fig, ax = plt.subplots(figsize=(12, 6))
 
     oms = list(om_data.keys())
-    nd_transfer = [om_data[om]['ND Transfer'] for om in oms]
-    rf_transfer = [om_data[om]['RF Transfer'] for om in oms]
-    demand = [om_data[om]['Demand'] for om in oms]
-    received = [om_data[om]['Received'] for om in oms]
+    nd_transfer = [om_data[om]['ND轉移量'] for om in oms]
+    rf_transfer = [om_data[om]['RF轉移量'] for om in oms]
+    demand = [om_data[om]['需求量'] for om in oms]
+    received = [om_data[om]['實際接收量'] for om in oms]
 
     x = np.arange(len(oms))
     width = 0.2
 
     if mode == 'A':
-        ax.bar(x - width*1.5, nd_transfer, width, label='ND Transfer Qty', color='blue')
-        ax.bar(x - width/2, rf_transfer, width, label='RF Excess Transfer Qty', color='green')
-        ax.bar(x + width/2, demand, width, label='Demand Qty', color='red')
-        ax.bar(x + width*1.5, received, width, label='Actual Received Qty', color='orange')
+        ax.bar(x - width*1.5, nd_transfer, width, label='ND轉移量', color='blue')
+        ax.bar(x - width/2, rf_transfer, width, label='RF剩餘轉移量', color='green')
+        ax.bar(x + width/2, demand, width, label='需求量', color='red')
+        ax.bar(x + width*1.5, received, width, label='實際接收量', color='orange')
     elif mode == 'B':
-        ax.bar(x - width*2, nd_transfer, width, label='ND Transfer Qty', color='blue')
-        ax.bar(x - width, rf_transfer, width, label='RF Enhanced Transfer Qty', color='green')
-        ax.bar(x, demand, width, label='Demand Qty', color='red')
-        ax.bar(x + width, received, width, label='Actual Received Qty', color='orange')
+        ax.bar(x - width*2, nd_transfer, width, label='ND轉移量', color='blue')
+        ax.bar(x - width, rf_transfer, width, label='RF增強轉移量', color='green')
+        ax.bar(x, demand, width, label='需求量', color='red')
+        ax.bar(x + width, received, width, label='實際接收量', color='orange')
     else:  # Mode C
-        ax.bar(x - width*2, nd_transfer, width, label='ND Transfer Qty', color='blue')
-        ax.bar(x - width, rf_transfer, width, label='RF Super Enhanced Transfer Qty', color='green')
-        ax.bar(x, demand, width, label='Demand Qty', color='red')
-        ax.bar(x + width, received, width, label='Actual Received Qty', color='orange')
+        ax.bar(x - width*2, nd_transfer, width, label='ND轉移量', color='blue')
+        ax.bar(x - width, rf_transfer, width, label='RF超級增強轉移量', color='green')
+        ax.bar(x, demand, width, label='需求量', color='red')
+        ax.bar(x + width, received, width, label='實際接收量', color='orange')
 
-    ax.set_xlabel('OM Units')
-    ax.set_ylabel('Transfer Quantity')
-    ax.set_title('Transfer Receive Analysis')
+    ax.set_xlabel('OM組別')
+    ax.set_ylabel('轉移數量')
+    ax.set_title('轉移接收分析圖')
     ax.set_xticks(x)
     ax.set_xticklabels(oms)
     ax.legend()
@@ -637,14 +650,14 @@ def create_visualization(transfers, mode, df):
     return fig
 
 def export_to_excel(transfers, stats):
-    """Export results to Excel with two sheets"""
+    """將結果匯出到Excel，包含兩個工作表"""
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Sheet 1: Transfer Recommendations
+        # 工作表1: 轉移建議
         if transfers:
             transfer_df = pd.DataFrame(transfers)
-            # Reorder columns as specified
+            # 重新排序欄位
             columns_order = [
                 'Article', 'Article Description', 'OM', 'Transfer Site', 'Transfer Qty',
                 'Transfer Site Original Stock', 'Transfer Site After Transfer Stock',
@@ -653,105 +666,105 @@ def export_to_excel(transfers, stats):
                 'Transfer Type', 'Receive Qty', 'Notes'
             ]
             transfer_df = transfer_df[columns_order]
-            transfer_df.to_excel(writer, sheet_name='Transfer Recommendations', index=False)
+            transfer_df.to_excel(writer, sheet_name='轉移建議', index=False)
 
-        # Sheet 2: Statistics Summary
-        # Basic KPIs
+        # 工作表2: 統計摘要
+        # 基本KPI
         basic_stats = pd.DataFrame([{
-            'Metric': 'Total Recommendations',
-            'Value': stats['basic']['total_recommendations']
+            '指標': '總建議數',
+            '數值': stats['basic']['total_recommendations']
         }, {
-            'Metric': 'Total Transfer Quantity',
-            'Value': stats['basic']['total_transfer_qty']
+            '指標': '總轉移量',
+            '數值': stats['basic']['total_transfer_qty']
         }, {
-            'Metric': 'Unique Articles',
-            'Value': stats['basic']['unique_articles']
+            '指標': '唯一商品數',
+            '數值': stats['basic']['unique_articles']
         }, {
-            'Metric': 'Unique OMs',
-            'Value': stats['basic']['unique_oms']
+            '指標': '唯一OM數',
+            '數值': stats['basic']['unique_oms']
         }])
 
         start_row = 0
-        basic_stats.to_excel(writer, sheet_name='Statistics Summary', startrow=start_row, index=False)
+        basic_stats.to_excel(writer, sheet_name='統計摘要', startrow=start_row, index=False)
 
-        # By Article
+        # 按商品統計
         start_row += len(basic_stats) + 3
         if stats['by_article']:
             article_df = pd.DataFrame(stats['by_article'])
-            article_df.to_excel(writer, sheet_name='Statistics Summary', startrow=start_row, index=False)
+            article_df.to_excel(writer, sheet_name='統計摘要', startrow=start_row, index=False)
 
-        # By OM
+        # 按OM統計
         start_row += len(stats['by_article']) + 3
         if stats['by_om']:
             om_df = pd.DataFrame(stats['by_om'])
-            om_df.to_excel(writer, sheet_name='Statistics Summary', startrow=start_row, index=False)
+            om_df.to_excel(writer, sheet_name='統計摘要', startrow=start_row, index=False)
 
-        # Transfer Types
+        # 轉移類型
         start_row += len(stats['by_om']) + 3
         if stats['transfer_types']:
             type_data = []
             for ttype, data in stats['transfer_types'].items():
                 type_data.append({
-                    'Transfer Type': ttype,
-                    'Total Quantity': data['qty'],
-                    'Total Lines': data['lines']
+                    '轉移類型': ttype,
+                    '總量': data['qty'],
+                    '行數': data['lines']
                 })
             type_df = pd.DataFrame(type_data)
-            type_df.to_excel(writer, sheet_name='Statistics Summary', startrow=start_row, index=False)
+            type_df.to_excel(writer, sheet_name='統計摘要', startrow=start_row, index=False)
 
-        # Receive Stats
+        # 接收統計
         start_row += len(type_data) + 3
         if stats['receive_stats']:
             receive_df = pd.DataFrame(stats['receive_stats'])
-            receive_df.to_excel(writer, sheet_name='Statistics Summary', startrow=start_row, index=False)
+            receive_df.to_excel(writer, sheet_name='統計摘要', startrow=start_row, index=False)
 
     output.seek(0)
     return output
 
 # Main UI
-st.header("1. Data Upload")
-uploaded_file = st.file_uploader("Upload Excel file", type=['xlsx', 'xls'])
+st.header("1. 資料上傳")
+uploaded_file = st.file_uploader("上傳Excel檔案", type=['xlsx', 'xls'])
 
 if uploaded_file is not None:
-    with st.spinner("Loading and validating data..."):
+    with st.spinner("正在載入並驗證資料..."):
         data = load_data(uploaded_file)
         if data is not None:
             st.session_state.data = data
-            st.success(f"Data loaded successfully! {len(data)} rows processed.")
+            st.success(f"資料載入成功！共處理 {len(data)} 行資料。")
 
-            # Data preview
-            st.header("2. Data Preview")
-            st.subheader("Sample Data")
+            # 資料預覽
+            st.header("2. 資料預覽")
+            st.subheader("樣本資料")
             st.dataframe(data.head(10))
 
-            st.subheader("Basic Statistics")
+            st.subheader("基本統計")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
-                st.metric("Total Rows", len(data))
+                st.metric("總行數", len(data))
             with col2:
-                st.metric("Unique Articles", data['Article'].nunique())
+                st.metric("唯一商品數", data['Article'].nunique())
             with col3:
-                st.metric("Unique Sites", data['Site'].nunique())
+                st.metric("唯一店舖數", data['Site'].nunique())
             with col4:
-                st.metric("Unique OMs", data['OM'].nunique())
+                st.metric("唯一OM組別數", data['OM'].nunique())
 
-            # Preprocess data
-            with st.spinner("Preprocessing data..."):
+            # 預處理資料
+            with st.spinner("正在預處理資料..."):
                 processed_data = preprocess_data(data)
                 st.session_state.processed_data = processed_data
 
-            # Mode selection
-            st.header("3. Transfer Mode Selection")
+            # 模式選擇
+            st.header("3. 轉移模式選擇")
             mode = st.radio(
-                "Select Transfer Mode:",
-                ['A: Conservative Transfer', 'B: Enhanced Transfer', 'C: Super Enhanced Transfer'],
+                "選擇轉移模式:",
+                ['A: 保守轉移', 'B: 增強轉移', 'C: 超級增強轉移'],
                 index=0
             )
             st.session_state.mode = mode[0]
 
-            # Generate recommendations
-            if st.button("Generate Transfer Recommendations", type="primary"):
-                with st.spinner("Generating recommendations..."):
+            # 生成建議
+            if st.button("生成轉移建議", type="primary"):
+                with st.spinner("正在生成建議..."):
                     if mode.startswith('A'):
                         transfers = generate_transfer_recommendations_conservative(processed_data)
                     elif mode.startswith('B'):
@@ -762,70 +775,70 @@ if uploaded_file is not None:
                     st.session_state.transfer_results = transfers
 
                     if transfers:
-                        st.success(f"Generated {len(transfers)} transfer recommendations!")
+                        st.success(f"成功生成 {len(transfers)} 條轉移建議！")
 
-                        # Statistics
-                        st.header("4. Analysis Results")
+                        # 統計分析
+                        st.header("4. 分析結果")
                         stats = calculate_statistics(transfers, processed_data)
 
-                        # KPI Cards
+                        # KPI 卡片
                         col1, col2, col3, col4 = st.columns(4)
                         with col1:
-                            st.metric("Total Recommendations", stats['basic']['total_recommendations'])
+                            st.metric("總建議數", stats['basic']['total_recommendations'])
                         with col2:
-                            st.metric("Total Transfer Qty", stats['basic']['total_transfer_qty'])
+                            st.metric("總轉移量", stats['basic']['total_transfer_qty'])
                         with col3:
-                            st.metric("Unique Articles", stats['basic']['unique_articles'])
+                            st.metric("唯一商品數", stats['basic']['unique_articles'])
                         with col4:
-                            st.metric("Unique OMs", stats['basic']['unique_oms'])
+                            st.metric("唯一OM數", stats['basic']['unique_oms'])
 
-                        # Transfer Results Table
-                        st.subheader("Transfer Recommendations")
+                        # 轉移結果表格
+                        st.subheader("轉移建議明細")
                         transfer_df = pd.DataFrame(transfers)
                         st.dataframe(transfer_df)
 
-                        # Statistics Tables
-                        st.subheader("Statistics by Article")
+                        # 統計表格
+                        st.subheader("按商品統計")
                         if stats['by_article']:
                             st.dataframe(pd.DataFrame(stats['by_article']))
 
-                        st.subheader("Statistics by OM")
+                        st.subheader("按OM統計")
                         if stats['by_om']:
                             st.dataframe(pd.DataFrame(stats['by_om']))
 
-                        st.subheader("Transfer Type Distribution")
+                        st.subheader("轉移類型分佈")
                         if stats['transfer_types']:
                             type_data = []
                             for ttype, data in stats['transfer_types'].items():
                                 type_data.append({
-                                    'Type': ttype,
-                                    'Total Qty': data['qty'],
-                                    'Lines': data['lines']
+                                    '類型': ttype,
+                                    '總量': data['qty'],
+                                    '行數': data['lines']
                                 })
                             st.dataframe(pd.DataFrame(type_data))
 
-                        # Visualization
-                        st.subheader("Transfer Analysis Chart")
+                        # 視覺化
+                        st.subheader("轉移分析圖表")
                         fig = create_visualization(transfers, st.session_state.mode, processed_data)
                         if fig:
                             st.pyplot(fig)
 
-                        # Export
-                        st.header("5. Export Results")
+                        # 匯出
+                        st.header("5. 匯出結果")
                         excel_data = export_to_excel(transfers, stats)
                         st.download_button(
-                            label="📥 Download Excel File",
+                            label="📥 下載Excel檔案",
                             data=excel_data.getvalue(),
-                            file_name=f"Mandatory_Transfer_Recommendations_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                            file_name=f"店舖轉移建議_{datetime.now().strftime('%Y%m%d')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key="excel_download"
                         )
                     else:
-                        st.warning("No transfer recommendations generated. Please check your data and try different mode.")
+                        st.warning("未生成轉移建議。請檢查您的資料並嘗試不同模式。")
 
 else:
-    st.info("Please upload an Excel file to get started.")
+    st.info("請上傳Excel檔案開始。")
 
 # Footer
 st.markdown("---")
-st.markdown("*Developed by Ricky - Version 1.0*")
+st.markdown("*開發者: Ricky - 版本 2.0*")
